@@ -1,0 +1,126 @@
+# VidiaForge — Netlify deployment config
+#
+# This file deploys the Next.js 16 frontend (landing + auth + dashboard + editor +
+# settings views + static assets) to Netlify. The API + worker are deployed to
+# Render separately (see render.yaml).
+#
+# In production, Netlify serves the HTML + static assets; the browser sends API
+# calls to NEXT_PUBLIC_API_URL (the Render origin). The rewrite rule below forwards
+# /api/* calls to Render so the frontend code can use relative URLs in dev and
+# absolute URLs in production without code changes.
+#
+# IMPORTANT — security:
+#   Only NEXT_PUBLIC_* env vars belong here. Server-only secrets
+#   (DATABASE_URL, STORAGE_SECRET_KEY, JWT_SECRET, SESSION_SECRET, *_API_KEY) MUST
+#   NOT be set in Netlify — they belong in Render's environment. Setting them
+#   here would expose them in the client bundle.
+
+[build]
+  # Next.js 16 standalone build (see package.json scripts.build for the static-asset copy).
+  command = "bun run build"
+
+  # The @netlify/plugin-nextjs plugin handles SSR/SSG for the Next.js App Router.
+  # It reads from .next/standalone + .next/static + public automatically.
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+  # Bun is available via Netlify's native runtime; ensure it's used for installs.
+  NETLIFY_USE_BUN = "true"
+  # Force Next.js 16 (already pinned in package.json, but explicit is safer).
+  NEXT_VERSION = "16"
+
+# ─── Next.js runtime plugin ────────────────────────────────────────────────────
+# Required for Next.js App Router SSR + Image Optimization on Netlify.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# ─── Security headers ──────────────────────────────────────────────────────────
+# Applied to all responses from Netlify.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # Prevent clickjacking — VidiaForge must not be embedded in iframes.
+    X-Frame-Options = "DENY"
+    # Prevent MIME-type sniffing.
+    X-Content-Type-Options = "nosniff"
+    # Only send the origin for same-origin requests; strip it for cross-origin.
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    # Permissions policy: allow camera + microphone + display-capture for the
+    # in-browser recording feature; deny everything else.
+    # Format: feature=(allowlist) where "self" means same-origin.
+    Permissions-Policy = "camera=(self), microphone=(self), display-capture=(self), geolocation=(), interest-cohort=()"
+    # HSTS — force HTTPS for 1 year (Netlify already enforces HTTPS, this locks it in).
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
+    # Content Security Policy — restrictive default. Allows inline styles + scripts
+    # (required by Next.js) and self for everything else. Connects to the API origin
+    # via NEXT_PUBLIC_API_URL at runtime.
+    # NOTE: replace 'self' for connect-src with the Render origin in production.
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+
+# ─── Static asset caching ──────────────────────────────────────────────────────
+# Next.js static assets (hashed filenames) are immutable — cache for 1 year.
+[[headers]]
+  for = "/_next/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Service worker — never cache the SW itself; the browser fetches it fresh.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+# Manifest — short cache so updates propagate.
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+
+# ─── SPA fallback ──────────────────────────────────────────────────────────────
+# Next.js is a single-route SPA in this project (src/app/page.tsx + Zustand
+# view-state routing). The @netlify/plugin-nextjs plugin handles the fallback
+# automatically — no manual `/* /index.html 200` redirect is needed.
+#
+# If the plugin is unavailable, uncomment the following redirect:
+#
+# [[redirects]]
+#   from = "/*"
+#   to = "/index.html"
+#   status = 200
+
+# ─── API proxy rewrite ────────────────────────────────────────────────────────
+# V6 §24-27: RENDER OWNS THE API. Netlify is frontend-only.
+#
+# Forward /api/* calls to the Render API origin so the frontend code can use
+# relative URLs in both dev (next dev, same-origin) and production (Netlify →
+# Render via this rewrite).
+#
+# Set NEXT_PUBLIC_API_URL in the Netlify site settings to your Render origin
+# (e.g. https://vidiaforge-api.onrender.com). The rewrite below uses a Netlify
+# env var interpolation: ${NEXT_PUBLIC_API_URL}/:splat.
+#
+# V6 §25: force = true ensures this redirect takes priority over the Next.js
+# plugin's function-based API routes, preventing Netlify from accidentally
+# becoming a second API with a different database/Redis/storage config.
+# When NEXT_PUBLIC_API_URL is unset (local dev), the redirect target is empty
+# and Netlify falls through to the Next.js API routes (same-origin).
+[[redirects]]
+  from = "/api/*"
+  to = "${NEXT_PUBLIC_API_URL}/api/:splat"
+  status = 200
+  force = true
+  [redirects.headers]
+    X-Forwarded-Host = "vidiaforge.netlify.app"
+
+# ─── Functions configuration ──────────────────────────────────────────────────
+# V6 §25: In production, /api/* is proxied to Render (see redirect above),
+# so the Next.js API route handlers do NOT run as Netlify Functions.
+# This config only applies to local development.
+[functions]
+  external_node_modules = ["sharp", "@prisma/client"]
+
+# ─── Build performance ────────────────────────────────────────────────────────
+# Skip building the Netlify Functions for paths we proxy to Render.
+[build.processing]
+  skip_processing = false

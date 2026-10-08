@@ -1,0 +1,233 @@
+# VidiaForge — Render Blueprint v2 (production-ready)
+#
+# Deploys the production backend stack on Render:
+#   - vidiaforge-api      (web service — Next.js 16 standalone, runtime: node)
+#   - vidiaforge-worker   (background worker — FFmpeg pipeline, runtime: docker)
+#   - vidiaforge-db       (PostgreSQL 15)
+#   - vidiaforge-redis    (Redis 7)
+#
+# Apply with: `render blueprint deploy` (Render CLI) or by linking this
+# repo to a Render Blueprint in the dashboard.
+#
+# Runtime split rationale (S1):
+#   - API service uses Render's `node` runtime: it doesn't need FFmpeg,
+#     `bun run build` is enough, and Render manages the start command.
+#   - Worker service uses Render's `docker` runtime: the worker REQUIRES
+#     FFmpeg + ffprobe for the media-ingestion + render pipelines. Render's
+#     Node runtime does NOT include FFmpeg, so we ship the worker.Dockerfile
+#     image which installs + verifies ffmpeg/ffprobe at build time. The
+#     worker.Dockerfile also copies the worker source tree (mini-services/)
+#     and merges worker-only deps into /app/node_modules so shared lib code
+#     can resolve them.
+
+services:
+  # ─── Web service: Next.js API + SSR ─────────────────────────────────────────
+  - type: web
+    name: vidiaforge-api
+    runtime: node
+    plan: starter
+    region: oregon
+    branch: main
+    rootDir: ./
+    # Node 22 is required (see netlify.toml + Dockerfile for the same pin).
+    runtimeVersion: "22"
+    # Next.js standalone build. `bun install` for reproducible installs;
+    # `bun run build` produces .next/standalone/server.js.
+    buildCommand: bun install --frozen-lockfile && bun run build
+    # Start the standalone Next.js server. `bun .next/standalone/server.js`
+    # runs the Node-compatible server via Bun's runtime.
+    startCommand: bun .next/standalone/server.js
+    # Liveness + DB connectivity check. Returns 200 { status: "ok", db: "connected" }.
+    healthCheckPath: /api/health
+    # Auto-deploy on push to main.
+    autoDeploy: true
+    # Pre-deploy: ensure Prisma client is generated + DB migrations applied.
+    # prisma migrate deploy reads prisma/migrations/ (committed in S1).
+    preDeployCommand: bun run db:generate && bun run db:migrate:deploy
+    # Env vars: shared secrets via Render keychain (sync: false = set manually in
+    # dashboard) + a few safe inlines + DATABASE_URL/REDIS_URL from the resources.
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vidiaforge-db
+          property: connectionString
+      - key: REDIS_URL
+        fromDatabase:
+          name: vidiaforge-redis
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false  # set manually in Render dashboard (min 32 chars)
+      - key: SESSION_SECRET
+        sync: false  # set manually in Render dashboard (min 32 chars)
+      - key: STORAGE_PROVIDER
+        value: s3
+      - key: STORAGE_ENDPOINT
+        sync: false  # e.g. https://<account>.r2.cloudflarestorage.com
+      - key: STORAGE_BUCKET
+        sync: false
+      - key: STORAGE_REGION
+        sync: false  # auto for R2, us-east-1 for AWS S3
+      - key: STORAGE_ACCESS_KEY
+        sync: false
+      - key: STORAGE_SECRET_KEY
+        sync: false
+      - key: STORAGE_PUBLIC_BASE_URL
+        sync: false  # public CDN URL fronting the bucket
+      - key: AI_PROVIDER
+        value: zai
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: TRANSCRIPTION_PROVIDER
+        sync: false  # openai | deepgram | local
+      - key: TRANSCRIPTION_API_KEY
+        sync: false
+      - key: TRANSLATION_PROVIDER
+        sync: false
+      - key: TRANSLATION_API_KEY
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false  # set to the Netlify frontend origin, e.g. https://vidiaforge.netlify.app
+      - key: NEXT_PUBLIC_API_URL
+        sync: false  # set to this service's URL, e.g. https://vidiaforge-api.onrender.com
+      - key: NEXT_PUBLIC_APP_NAME
+        value: VidiaForge
+      - key: NEXT_PUBLIC_STORAGE_PUBLIC_BASE_URL
+        sync: false  # set to match STORAGE_PUBLIC_BASE_URL
+    # Disk for local storage fallback (when STORAGE_PROVIDER=local) — small,
+    # mostly for ephemeral cache. When using S3/R2, this is unused.
+    disk:
+      name: vidiaforge-api-disk
+      mountPath: /app/data
+      sizeGB: 5
+
+  # ─── Background worker: FFmpeg render + AI ingest pipeline ─────────────────
+  # Uses Docker runtime because the worker REQUIRES FFmpeg + ffprobe (installed
+  # in worker.Dockerfile). Render's Node runtime does NOT include FFmpeg.
+  #
+  # The worker exposes a tiny /health endpoint on port 3001 for monitoring.
+  # Render's `worker` service type does not run HTTP health checks by default;
+  # use `docker logs vidiaforge-worker` or Render's worker logs to verify
+  # `VIDIAFORGE WORKER READY` appears at startup.
+  - type: worker
+    name: vidiaforge-worker
+    runtime: docker
+    dockerfilePath: ./worker.Dockerfile
+    dockerContext: .
+    plan: standard  # workers need CPU + RAM for FFmpeg; do not use the free tier
+    region: oregon
+    branch: main
+    rootDir: ./
+    autoDeploy: true
+    # The worker.Dockerfile CMD is `["bun", "run", "worker:start"]` which
+    # resolves to `cd mini-services/worker && bun run src/index.ts`.
+    # No buildCommand/startCommand — Docker runtime uses the Dockerfile.
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vidiaforge-db
+          property: connectionString
+      - key: REDIS_URL
+        fromDatabase:
+          name: vidiaforge-redis
+          property: connectionString
+      - key: STORAGE_PROVIDER
+        value: s3
+      - key: STORAGE_ENDPOINT
+        sync: false
+      - key: STORAGE_BUCKET
+        sync: false
+      - key: STORAGE_REGION
+        sync: false
+      - key: STORAGE_ACCESS_KEY
+        sync: false
+      - key: STORAGE_SECRET_KEY
+        sync: false
+      - key: STORAGE_PUBLIC_BASE_URL
+        sync: false
+      - key: UPLOAD_DIR
+        value: /app/uploads
+      - key: TEMP_DIR
+        value: /app/tmp
+      - key: WORKER_CONCURRENCY
+        value: "2"
+      - key: WORKER_PORT
+        value: "3001"
+      - key: AI_PROVIDER
+        value: zai
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: TRANSCRIPTION_PROVIDER
+        sync: false
+      - key: TRANSCRIPTION_API_KEY
+        sync: false
+      - key: TRANSLATION_PROVIDER
+        sync: false
+      - key: TRANSLATION_API_KEY
+        sync: false
+      # Worker doesn't need CORS or NEXT_PUBLIC_* — those are browser-facing.
+    # Larger disk for temp render output + proxy media (cleaned periodically
+    # by the worker; the render pipeline writes intermediate files here).
+    disk:
+      name: vidiaforge-worker-disk
+      mountPath: /app/data
+      sizeGB: 20
+
+# ─── Managed resources ─────────────────────────────────────────────────────────
+# Render will create these on first blueprint deploy and inject their connection
+# strings into the services via the `fromDatabase` references above.
+databases:
+  # PostgreSQL 15 — the primary datastore.
+  # V15.1 §42: Production network hardening — Render private networking.
+  # The 0.0.0.0/0 allowlist is REMOVED. Render internal services connect via
+  # the private network (fromDatabase injects the internal connection string).
+  # If public access is needed for external tools, add specific CIDRs — never 0.0.0.0/0.
+  - name: vidiaforge-db
+    plan: starter
+    region: oregon
+    # V15.1: No ipAllowList = private/internal only on Render.
+    # This is the strongest supported configuration for managed databases.
+    # Render services connect via the internal `fromDatabase` connection string.
+
+  # Redis 7 — render queue + rate-limit token bucket + ephemeral state.
+  # V15.1 §43: Redis MUST be authenticated (REDIS_URL includes password).
+  # Private networking only — no public exposure.
+  - name: vidiaforge-redis
+    plan: starter
+    region: oregon
+    # V15.1: No ipAllowList = private/internal only on Render.
+
+# ─── Production notes ─────────────────────────────────────────────────────────
+#
+# 1. The "starter" plan for Postgres/Redis is the cheapest option that includes
+#    automated backups. Upgrade to "standard" for production load.
+#
+# 2. The web service uses Render's `node` runtime (no FFmpeg needed).
+#    The worker service uses Render's `docker` runtime (FFmpeg required —
+#    worker.Dockerfile installs + verifies ffmpeg/ffprobe at build time).
+#    This split is FINAL — no runtime changes are needed to go to production.
+#
+# 3. Env vars marked `sync: false` are placeholders — set them in the Render
+#    dashboard under Environment. They are NEVER committed to git.
+#
+# 4. The `preDeployCommand: bun run db:migrate:deploy` runs migrations on every
+#    API deploy. The migration history lives at prisma/migrations/ (committed
+#    in S1 as 0001_initial). The migration_lock.toml declares provider=postgresql.
+#
+# 5. Worker startup validation (mini-services/worker/src/index.ts):
+#    - Pings Redis, PostgreSQL, resolves ffmpeg/ffprobe via MediaBinaryResolver
+#    - Logs a structured JSON health report at boot
+#    - Exits with code 1 if any required dependency is missing
+#    - Only logs `VIDIAFORGE WORKER READY` when ALL checks pass
+#    - Graceful shutdown on SIGTERM/SIGINT (closes workers + Redis + DB)
