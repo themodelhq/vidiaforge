@@ -1,0 +1,489 @@
+# VidiaForge — Render Blueprint v8 (Node.js patch updated to 22.23.3)
+#
+# Deploys the production backend stack on Render:
+#   - vidiaforge-api      (web service — Next.js 16 standalone, runtime: node)
+#   - vidiaforge-worker   (background worker — FFmpeg pipeline, runtime: docker)
+#   - vidiaforge-redis    (Render Key Value service — Redis-compatible, type: keyvalue)
+#   - vidiaforge-db       (PostgreSQL 15)
+#
+# V19.1 RENDER BLUEPRINT REPAIR (v8) — Node.js patch-version update:
+#   - Updated Node.js from 22.11.0 to 22.23.3 (the latest Node.js 22 LTS
+#     patch as of 2026-10-10, verified via https://nodejs.org/dist/index.json
+#     + https://nodejs.org/en/about/previous-releases). This is a patch
+#     update within the Node.js 22 major version — NOT a major version
+#     change. The V8 prompt explicitly required evaluating whether a
+#     patch update is necessary; 22.23.3 is the latest 22.x LTS patch
+#     and stays within the existing 22 major version.
+#   - Updated `.node-version` (22.11.0 → 22.23.3) + the `NODE_VERSION`
+#     env var on the API service (22.11.0 → 22.23.3). Both declarations
+#     remain consistent — they pin the same version.
+#   - Did NOT change the Node.js major version (still 22). Did NOT
+#     change Bun (still 1.3.14 — the version that produced the committed
+#     `bun.lock`; the V8 prompt scoped this repair to the Node.js version
+#     question, not Bun). Did NOT introduce conflicting version
+#     declarations.
+#   - Preserved all v7 fixes: `runtimeVersion` remains ABSENT (the
+#     unsupported field was removed in v7); `runtime: node` remains
+#     configured; the `NODE_VERSION` env var remains the #1 supported
+#     method per Render's docs; the `.node-version` file remains the #2
+#     supported method.
+#   - Preserved all v6 fixes: root `bun.lock`, `.bun-version`, `BUN_VERSION`
+#     env var, `persistenceMode: journal-snapshot` on the Key Value
+#     service, corrected `redis://` (internal) vs `rediss://` (external)
+#     connection-string documentation.
+#   - Preserved all v5 fixes: Redis under `services:` with `type: keyvalue`;
+#     API + worker `REDIS_URL` use `fromService`; PostgreSQL under
+#     `databases:` with `fromDatabase`; `maxmemoryPolicy: noeviction`;
+#     `AUDIO_PROVIDER=internet-archive`.
+#
+# V19.1 RENDER BLUEPRINT REPAIR (v7) — preserved:
+#   - Removed the unsupported `runtimeVersion: "22"` field from the API
+#     service. Verified against Render's official Blueprint specification
+#     (https://render.com/docs/blueprint-spec) + the web services docs
+#     (https://render.com/docs/web-services) + the Node version docs
+#     (https://render.com/docs/node-version): `runtimeVersion` is NOT a
+#     supported Render Blueprint property. The v6 comments incorrectly
+#     claimed it was supported. The v7 configuration uses the supported
+#     mechanism instead.
+#   - Added `NODE_VERSION=22.23.3` (updated from 22.11.0 in v8) as an
+#     explicit env var on the API service. Per Render's docs
+#     (https://render.com/docs/node-version), setting the `NODE_VERSION`
+#     environment variable is the #1 supported method (in descending
+#     order of precedence) for pinning the Node.js version on a Render
+#     web service.
+#   - Preserved the `.node-version` file at the repo root (which now
+#     contains `22.23.3` per the v8 update). Per Render's docs, this is
+#     the #2 supported method (belt-and-suspenders with the `NODE_VERSION`
+#     env var). Having both is consistent — they pin the same version.
+#   - Preserved `runtime: node` (the supported runtime declaration).
+#   - Preserved all other API service fields: name, plan, region, branch,
+#     rootDir, buildCommand, startCommand, healthCheckPath, autoDeploy,
+#     preDeployCommand, envVars (except the NODE_VERSION value update),
+#     disk.
+#
+# V19.1 RENDER BLUEPRINT REPAIR (v6) — preserved:
+#   - Root `bun.lock` committed (285KB, 890 packages, generated with
+#     Bun 1.3.14). `bun install --frozen-lockfile` is reproducible.
+#   - `.node-version` (22.23.3, updated in v8) + `.bun-version` (1.3.14)
+#     files at the repo root.
+#   - `BUN_VERSION=1.3.14` env var on the API service (Render's Bun
+#     installer respects this when `bun` is invoked during the build).
+#   - `persistenceMode: journal-snapshot` on the Key Value service.
+#   - Corrected Redis connection-string documentation: internal
+#     `redis://` (no TLS, private network) vs external `rediss://` (TLS).
+#
+# V19.1 RENDER BLUEPRINT REPAIR (v5) — preserved:
+#   - Redis is declared under `services:` with `type: keyvalue` (Render's
+#     supported service type for a Redis-compatible Key Value instance).
+#   - The API + worker `REDIS_URL` env vars use `fromService` (not
+#     `fromDatabase`) referencing the `vidiaforge-redis` keyvalue service's
+#     `connectionString` property.
+#   - PostgreSQL remains under `databases:` (unchanged — that is the correct
+#     section for Render managed PostgreSQL).
+#   - `AUDIO_PROVIDER=internet-archive` is explicitly set on the API
+#     service so the deployed music catalog is non-empty (the Internet
+#     Archive adapter needs no credentials — public API).
+#   - The Key Value plan is `256mb` (Render's smallest paid Key Value
+#     plan identifier). `maxmemoryPolicy: noeviction` is set so the
+#     queue-oriented Redis workload (BullMQ) never has its queue data
+#     evicted under memory pressure.
+#
+# Apply with: `render blueprint deploy` (Render CLI) or by linking this
+# repo to a Render Blueprint in the dashboard.
+#
+# Runtime split rationale (S1):
+#   - API service uses Render's `node` runtime: it doesn't need FFmpeg,
+#     `bun run build` is enough, and Render manages the start command.
+#   - Worker service uses Render's `docker` runtime: the worker REQUIRES
+#     FFmpeg + ffprobe for the media-ingestion + render pipelines. Render's
+#     Node runtime does NOT include FFmpeg, so we ship the worker.Dockerfile
+#     image which installs + verifies ffmpeg/ffprobe at build time. The
+#     worker.Dockerfile also copies the worker source tree (mini-services/)
+#     and merges worker-only deps into /app/node_modules so shared lib code
+#     can resolve them.
+
+services:
+  # ─── Web service: Next.js API + SSR ─────────────────────────────────────────
+  - type: web
+    name: vidiaforge-api
+    runtime: node
+    plan: starter
+    region: oregon
+    branch: main
+    rootDir: ./
+    # V19.1 v7: the unsupported `runtimeVersion: "22"` field was removed.
+    # Node.js 22 is pinned via the `NODE_VERSION` env var (see below) +
+    # the `.node-version` file at the repo root. Per Render's docs
+    # (https://render.com/docs/node-version), `NODE_VERSION` is the #1
+    # supported method (in descending order of precedence) for pinning
+    # the Node.js version on a Render web service. The `.node-version`
+    # file is the #2 supported method. Both pin Node 22.23.3 (updated
+    # from 22.11.0 in v8 to the latest 22.x LTS patch).
+    # Next.js standalone build. `bun install` for reproducible installs;
+    # `bun run build` produces .next/standalone/server.js.
+    # Render's Node runtime does NOT include Bun by default. The `.bun-version`
+    # file at the repo root + the `BUN_VERSION` env var below cause Render's
+    # build image to install the intended Bun version (1.3.14) before the
+    # buildCommand runs. The root `bun.lock` (committed in v6) makes
+    # `bun install --frozen-lockfile` reproducible.
+    buildCommand: bun install --frozen-lockfile && bun run build
+    # Start the standalone Next.js server. `bun .next/standalone/server.js`
+    # runs the Node-compatible server via Bun's runtime.
+    startCommand: bun .next/standalone/server.js
+    # Liveness + DB connectivity check. Returns 200 { status: "ok", db: "connected" }.
+    healthCheckPath: /api/health
+    # Auto-deploy on push to main.
+    autoDeploy: true
+    # Pre-deploy: ensure Prisma client is generated + DB migrations applied.
+    # prisma migrate deploy reads prisma/migrations/ (committed in S1).
+    preDeployCommand: bun run db:generate && bun run db:migrate:deploy
+    # Env vars: shared secrets via Render keychain (sync: false = set manually in
+    # dashboard) + a few safe inlines + DATABASE_URL/REDIS_URL from the resources.
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # V19.1 v8: pin Node.js to 22.23.3 (the latest 22.x LTS patch, verified
+      # via https://nodejs.org/dist/index.json) via the supported NODE_VERSION
+      # env var. Per Render's docs (https://render.com/docs/node-version), this
+      # is the #1 supported method (in descending order of precedence) for
+      # pinning the Node.js version on a Render web service. The `.node-version`
+      # file at the repo root (which also contains 22.23.3) is the #2 supported
+      # method. The previous v6 `runtimeVersion: "22"` field was NOT a supported
+      # Render Blueprint property and has been removed.
+      - key: NODE_VERSION
+        value: "22.23.3"
+      # V19.1 v6: pin Bun to 1.3.14 (the version the v5 test report recorded as
+      # the tested build version). Render's Node runtime installs Bun when
+      # `bun` is invoked during the build; the `.bun-version` file + this env
+      # var ensure the installed Bun matches the version that produced the
+      # committed `bun.lock`. Without this, Render may install a different
+      # Bun version that could fail `--frozen-lockfile` or produce a different
+      # dependency resolution.
+      - key: BUN_VERSION
+        value: "1.3.14"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vidiaforge-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: vidiaforge-redis
+          type: keyvalue
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false  # set manually in Render dashboard (min 32 chars)
+      - key: SESSION_SECRET
+        sync: false  # set manually in Render dashboard (min 32 chars)
+      - key: STORAGE_PROVIDER
+        value: s3
+      - key: STORAGE_ENDPOINT
+        sync: false  # e.g. https://<account>.r2.cloudflarestorage.com
+      - key: STORAGE_BUCKET
+        sync: false
+      - key: STORAGE_REGION
+        sync: false  # auto for R2, us-east-1 for AWS S3
+      - key: STORAGE_ACCESS_KEY
+        sync: false
+      - key: STORAGE_SECRET_KEY
+        sync: false
+      - key: STORAGE_PUBLIC_BASE_URL
+        sync: false  # public CDN URL fronting the bucket
+      - key: AI_PROVIDER
+        value: zai
+      # V19.1 v5: enable the Internet Archive audio provider by default.
+      # The Internet Archive API is public (no credentials needed) and
+      # returns CC-BY / CC-BY-SA / CC0 / Public Domain audio. Live
+      # verification is still pending (the repair sandbox has no internet
+      # egress), but the adapter is contract-tested against recorded
+      # fixtures in tests/unit/audio-provider-contract.test.ts.
+      - key: AUDIO_PROVIDER
+        value: internet-archive
+      - key: JAMENDO_CLIENT_ID
+        sync: false  # only required when AUDIO_PROVIDER=jamendo
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: TRANSCRIPTION_PROVIDER
+        sync: false  # openai | deepgram | local
+      - key: TRANSCRIPTION_API_KEY
+        sync: false
+      - key: TRANSLATION_PROVIDER
+        sync: false
+      - key: TRANSLATION_API_KEY
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false  # set to the Netlify frontend origin, e.g. https://vidiaforge.netlify.app
+      # V19.1 v6: NEXT_PUBLIC_API_URL is declared here for completeness but is
+      # NOT consumed by the frontend code. The frontend uses relative
+      # `fetch('/api/...')` paths which the Netlify `/api/*` proxy forwards
+      # to this Render API. Setting this env var has no effect on the
+      # current frontend behavior. It is retained because removing it could
+      # break a deployed environment that has come to expect it. Documented
+      # honestly in docs/production-candidate-19-1/DEPLOYMENT_VERIFICATION.md.
+      - key: NEXT_PUBLIC_API_URL
+        sync: false  # declared but not consumed by the frontend (uses /api/* proxy)
+      - key: NEXT_PUBLIC_APP_NAME
+        value: VidiaForge
+      # V19.1 v6: NEXT_PUBLIC_STORAGE_PUBLIC_BASE_URL is declared here for
+      # completeness but is NOT consumed by the frontend code. The frontend
+      # fetches assets via `/api/assets/${id}` (same-origin proxy). The
+      # server-side `STORAGE_PUBLIC_BASE_URL` (above) is the one consumed by
+      # the storage provider for constructing public CDN URLs. Retained to
+      # avoid breaking a deployed environment that has come to expect it.
+      - key: NEXT_PUBLIC_STORAGE_PUBLIC_BASE_URL
+        sync: false  # declared but not consumed by the frontend (server-side STORAGE_PUBLIC_BASE_URL is)
+    # Disk for local storage fallback (when STORAGE_PROVIDER=local) — small,
+    # mostly for ephemeral cache. When using S3/R2, this is unused.
+    disk:
+      name: vidiaforge-api-disk
+      mountPath: /app/data
+      sizeGB: 5
+
+  # ─── Background worker: FFmpeg render + AI ingest pipeline ─────────────────
+  # Uses Docker runtime because the worker REQUIRES FFmpeg + ffprobe (installed
+  # in worker.Dockerfile). Render's Node runtime does NOT include FFmpeg.
+  #
+  # The worker exposes a tiny /health endpoint on port 3001 for monitoring.
+  # Render's `worker` service type does not run HTTP health checks by default;
+  # use `docker logs vidiaforge-worker` or Render's worker logs to verify
+  # `VIDIAFORGE WORKER READY` appears at startup.
+  - type: worker
+    name: vidiaforge-worker
+    runtime: docker
+    dockerfilePath: ./worker.Dockerfile
+    dockerContext: .
+    plan: standard  # workers need CPU + RAM for FFmpeg; do not use the free tier
+    region: oregon
+    branch: main
+    rootDir: ./
+    autoDeploy: true
+    # The worker.Dockerfile CMD is `["bun", "run", "worker:start"]` which
+    # resolves to `cd mini-services/worker && bun run src/index.ts`.
+    # No buildCommand/startCommand — Docker runtime uses the Dockerfile.
+    # The worker.Dockerfile uses `oven/bun:1-alpine` as the base image, so
+    # Bun is pre-installed in the worker image (no BUN_VERSION env var needed
+    # here — the Bun version is pinned by the Docker image tag + the
+    # `.bun-version` file is respected by `bun install` inside the image).
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vidiaforge-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: vidiaforge-redis
+          type: keyvalue
+          property: connectionString
+      - key: STORAGE_PROVIDER
+        value: s3
+      - key: STORAGE_ENDPOINT
+        sync: false
+      - key: STORAGE_BUCKET
+        sync: false
+      - key: STORAGE_REGION
+        sync: false
+      - key: STORAGE_ACCESS_KEY
+        sync: false
+      - key: STORAGE_SECRET_KEY
+        sync: false
+      - key: STORAGE_PUBLIC_BASE_URL
+        sync: false
+      - key: UPLOAD_DIR
+        value: /app/uploads
+      - key: TEMP_DIR
+        value: /app/tmp
+      - key: WORKER_CONCURRENCY
+        value: "2"
+      - key: WORKER_PORT
+        value: "3001"
+      - key: AI_PROVIDER
+        value: zai
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: TRANSCRIPTION_PROVIDER
+        sync: false
+      - key: TRANSCRIPTION_API_KEY
+        sync: false
+      - key: TRANSLATION_PROVIDER
+        sync: false
+      - key: TRANSLATION_API_KEY
+        sync: false
+      # Worker doesn't need CORS or NEXT_PUBLIC_* — those are browser-facing.
+    # Larger disk for temp render output + proxy media (cleaned periodically
+    # by the worker; the render pipeline writes intermediate files here).
+    disk:
+      name: vidiaforge-worker-disk
+      mountPath: /app/data
+      sizeGB: 20
+
+  # ─── Redis Key Value service (Render-managed, Redis-compatible) ────────────
+  # V19.1 RENDER BLUEPRINT REPAIR (v5):
+  #   - Render's Blueprint spec declares Redis-compatible instances under
+  #     `services:` with `type: keyvalue` — NOT under `databases:` (which is
+  #     reserved for Render-managed PostgreSQL).
+  #   - The API + worker reference this service via `fromService` with
+  #     `property: connectionString` (see the envVars blocks above).
+  #   - `ipAllowList: []` keeps the Key Value instance private (no public
+  #     inbound). Render services connect via the internal connection string.
+  #   - `plan: 256mb` is Render's smallest paid Key Value plan. It includes
+  #     the managed Redis-compatible service. (This is NOT a free plan —
+  #     see Render's pricing for the current cost. Upgrade to a larger plan
+  #     for production load; this configuration repair does NOT change the
+  #     plan automatically.)
+  #   - `maxmemoryPolicy: noeviction` is set so BullMQ queue data is never
+  #     evicted under memory pressure. BullMQ stores job metadata + queues
+  #     in Redis; eviction would cause job loss.
+  #
+  # V19.1 v6 — connection-string + persistence correction:
+  #   - The INTERNAL connection string (used when a Render service references
+  #     this Key Value service via `fromService`) is `redis://` (NO TLS)
+  #     because the traffic stays on Render's private network. The previous
+  #     v5 comments incorrectly claimed the internal string was `rediss://`.
+  #     The EXTERNAL connection string (used when connecting from outside
+  #     Render) is `rediss://` (TLS). The existing `ioredis` client
+  #     (`src/lib/queue.ts` + worker's `checkRedis()`) handles both forms
+  #     natively — no code change was required.
+  #   - `persistenceMode: journal-snapshot` is now explicitly declared. This
+  #     is a Render Blueprint supported property on paid Key Value plans
+  #     (the `256mb` plan is paid and supports it). Journal-snapshot
+  #     persistence provides periodic snapshots + an append-only journal
+  #     for recovery between snapshots. This REDUCES (but does NOT
+  #     eliminate) the risk of losing queued BullMQ jobs on a Redis
+  #     restart. Render's documentation describes this as the most
+  #     durable persistence option for Key Value; it is NOT equivalent to
+  #     Redis AOF + RDB combined, and a crash between snapshot intervals
+  #     can still lose the journaled-but-not-yet-snapshotted data. The
+  #     worker's stale-job recovery (`mini-services/worker/src/recovery.ts`)
+  #     handles jobs that were in-progress when Redis restarted; queued
+  #     jobs that were not yet picked up may still be lost in rare cases.
+  #     For mission-critical render jobs, the API's enqueue path is
+  #     idempotent via `render-identity.ts` + `timeline-hash.ts` so a lost
+  #     queue entry can be safely re-enqueued by the client. This is the
+  #     honest durability story — do NOT claim zero data loss.
+  - type: keyvalue
+    name: vidiaforge-redis
+    plan: 256mb
+    region: oregon
+    ipAllowList: []
+    maxmemoryPolicy: noeviction
+    persistenceMode: journal-snapshot
+
+# ─── Managed PostgreSQL resource ──────────────────────────────────────────────
+# Render will create the PostgreSQL database on first blueprint deploy and
+# inject its connection string into the API + worker via the `fromDatabase`
+# reference above (DATABASE_URL).
+databases:
+  # PostgreSQL 15 — the primary datastore.
+  # V15.1 §42: Production network hardening — Render private networking.
+  # The 0.0.0.0/0 allowlist is REMOVED. Render internal services connect via
+  # the private network (fromDatabase injects the internal connection string).
+  # If public access is needed for external tools, add specific CIDRs — never 0.0.0.0/0.
+  - name: vidiaforge-db
+    plan: starter
+    region: oregon
+    # V15.1: No ipAllowList = private/internal only on Render.
+    # This is the strongest supported configuration for managed databases.
+    # Render services connect via the internal `fromDatabase` connection string.
+
+# ─── Production notes ─────────────────────────────────────────────────────────
+#
+# 1. The "starter" plan for PostgreSQL + the "256mb" plan for the Key Value
+#    service are the cheapest paid options that include automated backups +
+#    managed Redis. Upgrade to "standard" for production load.
+#
+# 2. The web service uses Render's `node` runtime (no FFmpeg needed).
+#    The worker service uses Render's `docker` runtime (FFmpeg required —
+#    worker.Dockerfile installs + verifies ffmpeg/ffprobe at build time).
+#    This split is FINAL — no runtime changes are needed to go to production.
+#
+# 3. Env vars marked `sync: false` are placeholders — set them in the Render
+#    dashboard under Environment. They are NEVER committed to git.
+#
+# 4. The `preDeployCommand: bun run db:migrate:deploy` runs migrations on every
+#    API deploy. The migration history lives at prisma/migrations/ (committed
+#    in S1 as 0001_initial). The migration_lock.toml declares provider=postgresql.
+#
+# 5. Worker startup validation (mini-services/worker/src/index.ts):
+#    - Pings Redis, PostgreSQL, resolves ffmpeg/ffprobe via MediaBinaryResolver
+#    - Logs a structured JSON health report at boot
+#    - Exits with code 1 if any required dependency is missing
+#    - Only logs `VIDIAFORGE WORKER READY` when ALL checks pass
+#    - Graceful shutdown on SIGTERM/SIGINT (closes workers + Redis + DB)
+#
+# 6. V19.1 v8 — Node + Bun version pinning (Node.js patch updated to 22.23.3):
+#    - `.node-version` (22.23.3) at the repo root pins the exact Node patch
+#      version. Per Render's docs (https://render.com/docs/node-version), this
+#      is the #2 supported method (in descending order of precedence) for
+#      pinning the Node.js version on a Render web service.
+#    - `NODE_VERSION=22.23.3` env var on the API service is the #1 supported
+#      method (in descending order of precedence) per Render's docs. The v6
+#      `runtimeVersion: "22"` field was NOT a supported Render Blueprint
+#      property (verified against https://render.com/docs/blueprint-spec +
+#      https://render.com/docs/web-services + https://render.com/docs/node-version)
+#      and was removed in v7. The v8 pass updated the Node.js patch from
+#      22.11.0 to 22.23.3 (the latest 22.x LTS patch as of 2026-10-10,
+#      verified via https://nodejs.org/dist/index.json).
+#    - `.bun-version` (1.3.14) at the repo root + the `BUN_VERSION=1.3.14`
+#      env var on the API service pin the Bun version used during the
+#      build. The root `bun.lock` (committed in v6) was generated with
+#      Bun 1.3.14; `bun install --frozen-lockfile` is reproducible. The v8
+#      pass did NOT change Bun (the V8 prompt scoped this repair to the
+#      Node.js version question; updating Bun would require regenerating
+#      the lockfile, which is out of scope).
+#    - The worker uses `oven/bun:1.3.14-alpine` as its Docker base image, so
+#      Bun is pre-installed in the worker image (no BUN_VERSION env var
+#      needed there).
+#
+# 7. AUDIO_PROVIDER=internet-archive is set by default on the API service so
+#    the deployed music catalog is non-empty without any credentials. The
+#    Internet Archive adapter only returns CC-BY / CC-BY-SA / CC0 / Public
+#    Domain items (NC + ND licenses are filtered out). To use Jamendo instead,
+#    set `AUDIO_PROVIDER=jamendo` + `JAMENDO_CLIENT_ID` in the dashboard.
+#
+# 8. PERSISTENCE + DURABILITY (v6 honest documentation):
+#    - `maxmemoryPolicy: noeviction` prevents in-memory eviction under
+#      memory pressure (BullMQ queue data is never evicted while Redis is
+#      running).
+#    - `persistenceMode: journal-snapshot` provides periodic snapshots + an
+#      append-only journal for recovery between snapshots. This REDUCES
+#      (but does NOT eliminate) the risk of losing queued jobs on a Redis
+#      restart. A crash between snapshot intervals can still lose
+#      journaled-but-not-yet-snapshotted data. Render's documentation
+#      describes this as the most durable Key Value persistence option.
+#    - The worker's stale-job recovery (`mini-services/worker/src/recovery.ts`)
+#      handles jobs that were in-progress when Redis restarted; queued
+#      jobs that were not yet picked up may still be lost in rare cases.
+#    - For mission-critical render jobs, the API's enqueue path is
+#      idempotent via `render-identity.ts` + `timeline-hash.ts` so a lost
+#      queue entry can be safely re-enqueued by the client.
+#    - This is the honest durability story. Do NOT claim zero data loss.
+#
+# 9. CONNECTION-STRING FORMAT (v6 honest documentation):
+#    - The INTERNAL connection string (used by Render services via
+#      `fromService`) is `redis://` (NO TLS) because the traffic stays on
+#      Render's private network.
+#    - The EXTERNAL connection string (used when connecting from outside
+#      Render) is `rediss://` (TLS).
+#    - The existing `ioredis` client (`src/lib/queue.ts` + worker's
+#      `checkRedis()`) handles both `redis://` and `rediss://` URLs
+#      natively — no code change was required for either form.
+#    - The previous v5 comments + deployment docs incorrectly claimed the
+#      internal string was `rediss://`. This has been corrected.
+#
+# 10. V19.1 v5 — preserved repairs (unchanged in v6):
+#    - Redis is declared under `services:` with `type: keyvalue` (was
+#      previously incorrectly under `databases:`).
+#    - The API + worker `REDIS_URL` env vars use `fromService` (was
+#      previously incorrectly using `fromDatabase`).
+#    - PostgreSQL remains under `databases:` (correct).
+#    - `AUDIO_PROVIDER=internet-archive` is set on the API service.
+#    - `maxmemoryPolicy: noeviction` is set on the Key Value service.
