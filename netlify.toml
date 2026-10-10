@@ -1,0 +1,82 @@
+# VidiaForge — Netlify deployment config
+#
+# Netlify serves the Next.js frontend.
+# Render owns the API, database, Redis, storage, and worker services.
+#
+# IMPORTANT:
+# Keep DATABASE_URL, JWT_SECRET, SESSION_SECRET, STORAGE_SECRET_KEY,
+# and other private secrets on Render only.
+
+[build]
+  command = "bun run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "22"
+  NETLIFY_USE_BUN = "true"
+  NEXT_VERSION = "16"
+
+# Next.js App Router runtime
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Security headers
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(self), microphone=(self), display-capture=(self), geolocation=(), interest-cohort=()"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+
+# Immutable Next.js static assets
+[[headers]]
+  for = "/_next/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# Never cache the service worker
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+# Manifest caching
+[[headers]]
+  for = "/manifest.webmanifest"
+  [headers.values]
+    Cache-Control = "public, max-age=3600"
+
+# API proxy — Render is the source of truth for all API routes.
+# Keep this rule before any general fallback rules.
+#
+# V19.1 v5: The proxy target now matches the Render web service name declared
+# in render.yaml (`vidiaforge-api`). Render's default hostname convention for
+# a service named `vidiaforge-api` is `https://vidiaforge-api.onrender.com`.
+# The previous target `https://vidiaforge.onrender.com/api/:splat` did not
+# match the service name and would have routed to a nonexistent host.
+#
+# `status = 200` makes Netlify act as a transparent same-origin proxy (not a
+# 30x redirect) so the browser sees the request as same-origin — required
+# for the NextAuth session cookie (SameSite=Lax) to flow correctly.
+# `force = true` overrides any Next.js rewrites that would otherwise intercept
+# /api/* and serve a frontend page. The `X-Forwarded-Host` header tells the
+# Render API which Netlify origin initiated the request (useful for CORS +
+# secure-cookie origin checks on the backend).
+[[redirects]]
+  from = "/api/*"
+  to = "https://vidiaforge-api.onrender.com/api/:splat"
+  status = 200
+  force = true
+  [redirects.headers]
+    X-Forwarded-Host = "vidiaforge.netlify.app"
+
+# Netlify function configuration
+[functions]
+  external_node_modules = ["sharp", "@prisma/client"]
+
+# Keep Netlify processing enabled
+[build.processing]
+  skip_processing = false
