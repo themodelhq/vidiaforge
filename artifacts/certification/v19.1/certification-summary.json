@@ -1,0 +1,100 @@
+{
+  "version": "19.1",
+  "releaseName": "VidiaForge V19.1",
+  "status": "BLOCKED",
+  "runId": "VIDIAFORGE_CERT_V19_1_1791455606989",
+  "gitSha": "af532b7",
+  "timestamp": "2026-10-08T10:33:48.008Z",
+  "items": [
+    {
+      "id": "version",
+      "name": "Version Consistency",
+      "status": "PASS",
+      "durationMs": 0
+    },
+    {
+      "id": "ffmpeg",
+      "name": "FFmpeg",
+      "status": "PASS",
+      "durationMs": 0
+    },
+    {
+      "id": "ffprobe",
+      "name": "FFprobe",
+      "status": "PASS",
+      "durationMs": 0
+    },
+    {
+      "id": "typescript",
+      "name": "TypeScript",
+      "status": "PASS",
+      "durationMs": 3122
+    },
+    {
+      "id": "lint",
+      "name": "Lint",
+      "status": "PASS",
+      "durationMs": 11606
+    },
+    {
+      "id": "unit",
+      "name": "Unit tests",
+      "status": "PASS",
+      "durationMs": 219
+    },
+    {
+      "id": "aijob-concurrency",
+      "name": "AIJob concurrency",
+      "status": "BLOCKED",
+      "durationMs": 126
+    },
+    {
+      "id": "crash-recovery",
+      "name": "Worker crash/recovery",
+      "status": "BLOCKED",
+      "durationMs": 242
+    },
+    {
+      "id": "render-smoke",
+      "name": "Render smoke",
+      "status": "PASS",
+      "durationMs": 809
+    },
+    {
+      "id": "chroma-key-lut",
+      "name": "Chroma key + LUT E2E",
+      "status": "PASS",
+      "durationMs": 3275
+    },
+    {
+      "id": "keyframe-render",
+      "name": "Keyframe Render E2E",
+      "status": "PASS",
+      "durationMs": 973
+    },
+    {
+      "id": "local-e2e",
+      "name": "Local E2E",
+      "status": "BLOCKED",
+      "durationMs": 83
+    },
+    {
+      "id": "storage-e2e",
+      "name": "Storage E2E",
+      "status": "BLOCKED",
+      "durationMs": 209
+    },
+    {
+      "id": "template-e2e",
+      "name": "Template E2E",
+      "status": "BLOCKED",
+      "durationMs": 240
+    },
+    {
+      "id": "feature-matrix",
+      "name": "Feature Matrix",
+      "status": "PASS",
+      "durationMs": 0
+    }
+  ]
+}
