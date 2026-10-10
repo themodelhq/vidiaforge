@@ -1,0 +1,15 @@
+{
+  "version": "17.1",
+  "status": "PASS",
+  "timestamp": "2026-10-10T16:58:33.775Z",
+  "ffmpegPath": "/usr/bin/ffmpeg",
+  "ffprobePath": "/usr/bin/ffprobe",
+  "output": {
+    "codec": "h264",
+    "width": 640,
+    "height": 480,
+    "durationSec": 3,
+    "audioCodec": "aac",
+    "audioSampleRate": "44100"
+  }
+}

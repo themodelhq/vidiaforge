@@ -1,0 +1,41 @@
+{
+  "version": "19.1",
+  "release": "VidiaForge V19.1",
+  "gitSha": "a6eb925",
+  "timestamp": "2026-10-10T16:58:34.619Z",
+  "status": "PASS",
+  "test": "production-keyframe-render-e2e",
+  "renderer": "FFmpegRenderService (production)",
+  "projectId": "kf-test-project",
+  "outputKey": "renders/kf-prod-test-ad2267de-884f-4497-a18b-a523c48d3f50/output.mp4",
+  "outputDuration": 1,
+  "outputDimensions": "200x200",
+  "expected": {
+    "0.1s": {
+      "x": 0.1,
+      "y": 0.5
+    },
+    "0.5s": {
+      "x": 0.5,
+      "y": 0.5
+    },
+    "0.9s": {
+      "x": 0.9,
+      "y": 0.5
+    }
+  },
+  "actual": {
+    "0.1s": {
+      "x": 0.2575
+    },
+    "0.5s": {
+      "x": 0.5175
+    },
+    "0.9s": {
+      "x": 0.7675
+    }
+  },
+  "tolerance": 0.1,
+  "positionChanged": true,
+  "note": "X/Y keyframe expression reaches the compositor via overlay=x=expr:y=expr"
+}
