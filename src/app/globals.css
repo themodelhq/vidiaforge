@@ -1,0 +1,314 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* VidiaForge — Cinematic Dark (default) */
+:root {
+  --radius: 0.625rem;
+
+  /* Deep cinematic charcoal background */
+  --background: oklch(0.13 0.008 264);
+  --foreground: oklch(0.96 0.004 264);
+
+  --card: oklch(0.17 0.01 264);
+  --card-foreground: oklch(0.96 0.004 264);
+
+  --popover: oklch(0.15 0.01 264);
+  --popover-foreground: oklch(0.96 0.004 264);
+
+  /* Amber/orange accent — cinematic, warm, professional (NOT blue/indigo) */
+  --primary: oklch(0.78 0.17 70);
+  --primary-foreground: oklch(0.18 0.02 70);
+
+  --secondary: oklch(0.22 0.012 264);
+  --secondary-foreground: oklch(0.96 0.004 264);
+
+  --muted: oklch(0.2 0.01 264);
+  --muted-foreground: oklch(0.62 0.012 264);
+
+  --accent: oklch(0.26 0.014 264);
+  --accent-foreground: oklch(0.96 0.004 264);
+
+  --destructive: oklch(0.62 0.22 25);
+
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 10%);
+  --ring: oklch(0.78 0.17 70);
+
+  --chart-1: oklch(0.78 0.17 70);
+  --chart-2: oklch(0.7 0.15 160);
+  --chart-3: oklch(0.65 0.2 25);
+  --chart-4: oklch(0.6 0.18 300);
+  --chart-5: oklch(0.75 0.16 200);
+
+  --sidebar: oklch(0.15 0.01 264);
+  --sidebar-foreground: oklch(0.96 0.004 264);
+  --sidebar-primary: oklch(0.78 0.17 70);
+  --sidebar-primary-foreground: oklch(0.18 0.02 70);
+  --sidebar-accent: oklch(0.22 0.012 264);
+  --sidebar-accent-foreground: oklch(0.96 0.004 264);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.78 0.17 70);
+
+  /* Editor-specific tokens */
+  --editor-panel: oklch(0.15 0.01 264);
+  --editor-panel-elevated: oklch(0.18 0.012 264);
+  --editor-timeline-track: oklch(0.19 0.012 264);
+  --editor-timeline-ruler: oklch(0.16 0.01 264);
+  --editor-clip-video: oklch(0.5 0.16 45);
+  --editor-clip-audio: oklch(0.55 0.14 160);
+  --editor-clip-text: oklch(0.55 0.16 300);
+  --editor-clip-effect: oklch(0.55 0.18 200);
+  --editor-playhead: oklch(0.78 0.17 70);
+}
+
+.dark {
+  --background: oklch(0.13 0.008 264);
+  --foreground: oklch(0.96 0.004 264);
+  --card: oklch(0.17 0.01 264);
+  --card-foreground: oklch(0.96 0.004 264);
+  --popover: oklch(0.15 0.01 264);
+  --popover-foreground: oklch(0.96 0.004 264);
+  --primary: oklch(0.78 0.17 70);
+  --primary-foreground: oklch(0.18 0.02 70);
+  --secondary: oklch(0.22 0.012 264);
+  --secondary-foreground: oklch(0.96 0.004 264);
+  --muted: oklch(0.2 0.01 264);
+  --muted-foreground: oklch(0.62 0.012 264);
+  --accent: oklch(0.26 0.014 264);
+  --accent-foreground: oklch(0.96 0.004 264);
+  --destructive: oklch(0.62 0.22 25);
+  --border: oklch(1 0 0 / 8%);
+  --input: oklch(1 0 0 / 10%);
+  --ring: oklch(0.78 0.17 70);
+  --chart-1: oklch(0.78 0.17 70);
+  --chart-2: oklch(0.7 0.15 160);
+  --chart-3: oklch(0.65 0.2 25);
+  --chart-4: oklch(0.6 0.18 300);
+  --chart-5: oklch(0.75 0.16 200);
+  --sidebar: oklch(0.15 0.01 264);
+  --sidebar-foreground: oklch(0.96 0.004 264);
+  --sidebar-primary: oklch(0.78 0.17 70);
+  --sidebar-primary-foreground: oklch(0.18 0.02 70);
+  --sidebar-accent: oklch(0.22 0.012 264);
+  --sidebar-accent-foreground: oklch(0.96 0.004 264);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.78 0.17 70);
+  --editor-panel: oklch(0.15 0.01 264);
+  --editor-panel-elevated: oklch(0.18 0.012 264);
+  --editor-timeline-track: oklch(0.19 0.012 264);
+  --editor-timeline-ruler: oklch(0.16 0.01 264);
+  --editor-clip-video: oklch(0.5 0.16 45);
+  --editor-clip-audio: oklch(0.55 0.14 160);
+  --editor-clip-text: oklch(0.55 0.16 300);
+  --editor-clip-effect: oklch(0.55 0.18 200);
+  --editor-playhead: oklch(0.78 0.17 70);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "ss01", "cv01", "cv02";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  /* Custom scrollbar — professional editor feel */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: oklch(1 0 0 / 12%);
+    border-radius: 6px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: oklch(1 0 0 / 20%);
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  /* Thin scrollbar variant for panels */
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: oklch(1 0 0 / 14%);
+    border-radius: 4px;
+    border: 1px solid transparent;
+    background-clip: content-box;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: oklch(1 0 0 / 22%);
+    background-clip: content-box;
+  }
+  /* Firefox scrollbar styling for the thin variant */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: oklch(1 0 0 / 14%) transparent;
+  }
+}
+
+/* V19.1 §10: Stable sidebar layout — the editor sidebar must:
+ *   - fill the available height of its flex parent (height: 100%)
+ *   - never expand beyond the parent (overflow hidden on the wrapper)
+ *   - allow its inner content region to scroll independently (flex: 1 1 auto
+ *     + min-height: 0 + overflow-y: auto + overscroll-behavior: contain)
+ * This pattern is the well-known "flex column with a scrolling body"
+ * idiom; it works on Chrome, Firefox, Safari, and mobile browsers.
+ */
+.editor-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.editor-sidebar__content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+@layer utilities {
+  .bg-editor-panel {
+    background-color: var(--editor-panel);
+  }
+  .bg-editor-panel-elevated {
+    background-color: var(--editor-panel-elevated);
+  }
+  .bg-timeline-track {
+    background-color: var(--editor-timeline-track);
+  }
+  .bg-timeline-ruler {
+    background-color: var(--editor-timeline-ruler);
+  }
+  .text-balance {
+    text-wrap: balance;
+  }
+  .glass {
+    background: oklch(0.17 0.01 264 / 70%);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .no-select {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .drag-none {
+    -webkit-user-drag: none;
+    user-drag: none;
+  }
+  /* Cinematic gradient text */
+  .text-gradient-cinematic {
+    background: linear-gradient(135deg, oklch(0.96 0.004 264) 0%, oklch(0.78 0.17 70) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  /* Grid background pattern */
+  .bg-grid {
+    background-image:
+      linear-gradient(to right, oklch(1 0 0 / 3%) 1px, transparent 1px),
+      linear-gradient(to bottom, oklch(1 0 0 / 3%) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+  .bg-grid-sm {
+    background-image:
+      linear-gradient(to right, oklch(1 0 0 / 4%) 1px, transparent 1px),
+      linear-gradient(to bottom, oklch(1 0 0 / 4%) 1px, transparent 1px);
+    background-size: 16px 16px;
+  }
+  /* Glow effect for accents */
+  .glow-primary {
+    box-shadow: 0 0 24px -4px oklch(0.78 0.17 70 / 40%);
+  }
+}
+
+/* Range input styling for timeline zoom */
+input[type="range"].vf-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"].vf-range::-webkit-slider-runnable-track {
+  background: oklch(1 0 0 / 12%);
+  height: 4px;
+  border-radius: 2px;
+}
+input[type="range"].vf-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: -5px;
+  background: oklch(0.78 0.17 70);
+  height: 14px;
+  width: 14px;
+  border-radius: 50%;
+  border: 2px solid oklch(0.13 0.008 264);
+}
+
+/* Hide default focus ring on timeline canvas, keep accessible focus elsewhere */
+.timeline-canvas:focus {
+  outline: none;
+}
