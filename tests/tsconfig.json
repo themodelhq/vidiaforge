@@ -1,0 +1,38 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "baseUrl": "..",
+    "types": ["bun-types", "node"],
+    "moduleResolution": "bundler",
+    "module": "esnext",
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "preserve",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "allowJs": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "paths": {
+      "@/components/*": ["./src/app/components/*"],
+      "@/hooks/*": ["src/app/hooks/*"],
+      "@/lib/*": ["./lib/*"],
+      "@/stores/*": ["./stores/*"],
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": [
+    "./**/*.ts",
+    "./**/*.tsx",
+    "../lib/**/*.ts",
+    "../lib/**/*.tsx",
+    "../stores/**/*.ts",
+    "../src/app/components/**/*.ts",
+    "../src/app/components/**/*.tsx",
+    "../src/app/hooks/**/*.ts"
+  ],
+  "exclude": ["node_modules", ".next"]
+}

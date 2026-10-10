@@ -1,0 +1,279 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "id": "fixture-test-project",
+    "name": "Smoke Test Project",
+    "width": 640,
+    "height": 480,
+    "fps": 30,
+    "canvasPreset": "4:3",
+    "resolution": "480p"
+  },
+  "tracks": [
+    {
+      "id": "trk_video",
+      "kind": "video",
+      "name": "Video",
+      "locked": false,
+      "hidden": false,
+      "solo": false,
+      "muted": false,
+      "height": 56
+    },
+    {
+      "id": "trk_audio",
+      "kind": "audio",
+      "name": "Audio",
+      "locked": false,
+      "hidden": false,
+      "solo": false,
+      "muted": false,
+      "height": 64
+    },
+    {
+      "id": "trk_text",
+      "kind": "text",
+      "name": "Text",
+      "locked": false,
+      "hidden": false,
+      "solo": false,
+      "muted": false,
+      "height": 56
+    }
+  ],
+  "clips": [
+    {
+      "id": "clip_video_1",
+      "trackId": "trk_video",
+      "kind": "video",
+      "assetId": "asset_sample_video",
+      "assetName": "sample-video.mp4",
+      "sourceStart": 0,
+      "sourceEnd": 3,
+      "timelineStart": 0,
+      "duration": 3,
+      "speed": 1,
+      "reverse": false,
+      "frozen": null,
+      "transform": {
+        "x": 0,
+        "y": 0,
+        "scale": 1,
+        "rotation": 0,
+        "opacity": 1,
+        "anchorX": 0.5,
+        "anchorY": 0.5
+      },
+      "crop": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "blendMode": "normal",
+      "color": {
+        "exposure": 0,
+        "brightness": 0,
+        "contrast": 0,
+        "highlights": 0,
+        "shadows": 0,
+        "whites": 0,
+        "blacks": 0,
+        "saturation": 0,
+        "vibrance": 0,
+        "temperature": 0,
+        "tint": 0,
+        "hue": 0
+      },
+      "audio": {
+        "volume": 1,
+        "pan": 0,
+        "fadeIn": 0,
+        "fadeOut": 0,
+        "muted": false
+      },
+      "effects": [],
+      "filters": [],
+      "transitions": [
+        {
+          "id": "transition_fade_in",
+          "type": "fade",
+          "duration": 0.3
+        }
+      ],
+      "keyframes": [],
+      "masks": [],
+      "enabled": true
+    },
+    {
+      "id": "clip_audio_1",
+      "trackId": "trk_audio",
+      "kind": "audio",
+      "assetId": "asset_sample_audio",
+      "assetName": "sample-audio.wav",
+      "sourceStart": 0,
+      "sourceEnd": 3,
+      "timelineStart": 0,
+      "duration": 3,
+      "speed": 1,
+      "reverse": false,
+      "frozen": null,
+      "transform": {
+        "x": 0,
+        "y": 0,
+        "scale": 1,
+        "rotation": 0,
+        "opacity": 1,
+        "anchorX": 0.5,
+        "anchorY": 0.5
+      },
+      "crop": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "blendMode": "normal",
+      "color": {
+        "exposure": 0,
+        "brightness": 0,
+        "contrast": 0,
+        "highlights": 0,
+        "shadows": 0,
+        "whites": 0,
+        "blacks": 0,
+        "saturation": 0,
+        "vibrance": 0,
+        "temperature": 0,
+        "tint": 0,
+        "hue": 0
+      },
+      "audio": {
+        "volume": 0.8,
+        "pan": 0,
+        "fadeIn": 0.2,
+        "fadeOut": 0.3,
+        "muted": false
+      },
+      "effects": [],
+      "filters": [],
+      "transitions": [],
+      "keyframes": [],
+      "masks": [],
+      "enabled": true
+    },
+    {
+      "id": "clip_text_1",
+      "trackId": "trk_text",
+      "kind": "text",
+      "sourceStart": 0,
+      "sourceEnd": 2,
+      "timelineStart": 0.5,
+      "duration": 2,
+      "speed": 1,
+      "reverse": false,
+      "frozen": null,
+      "transform": {
+        "x": 0,
+        "y": 0,
+        "scale": 1,
+        "rotation": 0,
+        "opacity": 1,
+        "anchorX": 0.5,
+        "anchorY": 0.5
+      },
+      "crop": {
+        "top": 0,
+        "right": 0,
+        "bottom": 0,
+        "left": 0
+      },
+      "blendMode": "normal",
+      "color": {
+        "exposure": 0,
+        "brightness": 0,
+        "contrast": 0,
+        "highlights": 0,
+        "shadows": 0,
+        "whites": 0,
+        "blacks": 0,
+        "saturation": 0,
+        "vibrance": 0,
+        "temperature": 0,
+        "tint": 0,
+        "hue": 0
+      },
+      "audio": {
+        "volume": 1,
+        "pan": 0,
+        "fadeIn": 0,
+        "fadeOut": 0,
+        "muted": true
+      },
+      "effects": [],
+      "filters": [],
+      "transitions": [],
+      "keyframes": [],
+      "masks": [],
+      "text": {
+        "text": "VidiaForge Test",
+        "fontFamily": "DejaVu Sans",
+        "fontSize": 48,
+        "fontWeight": 700,
+        "italic": false,
+        "letterSpacing": 0,
+        "lineHeight": 1.2,
+        "align": "center",
+        "color": "#FFFFFF",
+        "stroke": {
+          "color": "#000000",
+          "width": 2
+        },
+        "shadow": {
+          "color": "#000000",
+          "blur": 4,
+          "x": 2,
+          "y": 2
+        }
+      },
+      "enabled": true
+    }
+  ],
+  "markers": [
+    {
+      "id": "marker_start",
+      "time": 0,
+      "label": "Start",
+      "color": "#00FF00"
+    },
+    {
+      "id": "marker_end",
+      "time": 3,
+      "label": "End",
+      "color": "#FF0000"
+    }
+  ],
+  "assets": [
+    {
+      "id": "asset_sample_video",
+      "name": "sample-video.mp4",
+      "kind": "video",
+      "mimeType": "video/mp4",
+      "size": 337019,
+      "duration": 3,
+      "width": 640,
+      "height": 480,
+      "fps": 30,
+      "storagePath": "tests/fixtures/sample-video.mp4"
+    },
+    {
+      "id": "asset_sample_audio",
+      "name": "sample-audio.wav",
+      "kind": "audio",
+      "mimeType": "audio/wav",
+      "size": 264678,
+      "duration": 3,
+      "storagePath": "tests/fixtures/sample-audio.wav"
+    }
+  ]
+}

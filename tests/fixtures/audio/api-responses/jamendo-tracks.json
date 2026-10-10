@@ -1,0 +1,116 @@
+{
+  "headers": {
+    "status": "success",
+    "code": 0,
+    "error_message": "",
+    "results_count": 4,
+    "results_fullcount": 145823
+  },
+  "results": [
+    {
+      "id": "1001",
+      "name": "Upbeat Pop Track (Fixture)",
+      "artist_name": "Fixture Jamendo Artist One",
+      "album_name": "Fixture Album A",
+      "audio": "https://prod.jamendo.com/?trackid=1001&format=mp32",
+      "audiodownload": "https://prod.jamendo.com/?trackid=1001&format=mp31",
+      "duration": 184,
+      "musicinfo": {
+        "tags": ["pop", "upbeat", "happy", "energetic"],
+        "speed": "medium",
+        "instruments": ["guitar", "drums", "synth"],
+        "vocals": "female",
+        "musicinfo": {
+          "subgenres": ["pop-rock", "indie-pop"],
+          "tags": ["upbeat", "happy", "energetic"]
+        }
+      },
+      "license_ccurl": "https://creativecommons.org/licenses/by/4.0/",
+      "prourl": "https://licensing.jamendo.com/en/track/1001"
+    },
+    {
+      "id": "1002",
+      "name": "Cinematic Orchestral Piece (Fixture)",
+      "artist_name": "Fixture Jamendo Artist Two",
+      "album_name": "Fixture Album B",
+      "audio": "https://prod.jamendo.com/?trackid=1002&format=mp32",
+      "audiodownload": "https://prod.jamendo.com/?trackid=1002&format=mp31",
+      "duration": 312,
+      "musicinfo": {
+        "tags": ["cinematic", "orchestral", "epic", "film-score"],
+        "speed": "medium",
+        "instruments": ["orchestra", "strings", "brass"],
+        "vocals": "no",
+        "musicinfo": {
+          "subgenres": ["film-score", "epic"],
+          "tags": ["cinematic", "epic"]
+        }
+      },
+      "license_ccurl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "prourl": "https://licensing.jamendo.com/en/track/1002"
+    },
+    {
+      "id": "1003",
+      "name": "Public Domain Ambient (Fixture)",
+      "artist_name": "Fixture Jamendo Artist Three",
+      "album_name": "Fixture Album C",
+      "audio": "https://prod.jamendo.com/?trackid=1003&format=mp32",
+      "audiodownload": "https://prod.jamendo.com/?trackid=1003&format=mp31",
+      "duration": 240,
+      "musicinfo": {
+        "tags": ["ambient", "atmospheric", "drone", "relax"],
+        "speed": "slow",
+        "instruments": ["synth", "pad"],
+        "vocals": "no",
+        "musicinfo": {
+          "subgenres": ["ambient", "drone"],
+          "tags": ["atmospheric", "relax"]
+        }
+      },
+      "license_ccurl": "http://creativecommons.org/publicdomain/zero/1.0/",
+      "prourl": null
+    },
+    {
+      "id": "1004",
+      "name": "NonCommercial Track (Should Be Skipped)",
+      "artist_name": "Fixture Jamendo Artist Four",
+      "album_name": "Fixture Album D",
+      "audio": "https://prod.jamendo.com/?trackid=1004&format=mp32",
+      "audiodownload": "https://prod.jamendo.com/?trackid=1004&format=mp31",
+      "duration": 200,
+      "musicinfo": {
+        "tags": ["pop", "non-commercial"],
+        "speed": "medium",
+        "instruments": ["guitar"],
+        "vocals": "male",
+        "musicinfo": {
+          "subgenres": ["pop"],
+          "tags": ["non-commercial"]
+        }
+      },
+      "license_ccurl": "https://creativecommons.org/licenses/by-nc/4.0/",
+      "prourl": null
+    },
+    {
+      "id": "1005",
+      "name": "No License Track (Should Be Skipped)",
+      "artist_name": "Fixture Jamendo Artist Five",
+      "album_name": "Fixture Album E",
+      "audio": "https://prod.jamendo.com/?trackid=1005&format=mp32",
+      "audiodownload": "https://prod.jamendo.com/?trackid=1005&format=mp31",
+      "duration": 180,
+      "musicinfo": {
+        "tags": ["unknown"],
+        "speed": "medium",
+        "instruments": ["piano"],
+        "vocals": "no",
+        "musicinfo": {
+          "subgenres": [],
+          "tags": ["unknown"]
+        }
+      },
+      "license_ccurl": "",
+      "prourl": null
+    }
+  ]
+}

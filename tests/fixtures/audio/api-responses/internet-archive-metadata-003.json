@@ -1,0 +1,24 @@
+{
+  "metadata": {
+    "identifier": "test-cc0-ambient-003",
+    "title": "CC0 Ambient Soundscape (Fixture)",
+    "creator": "Fixture Artist Three",
+    "date": "2024-03-20T00:00:00Z",
+    "licenseurl": "http://creativecommons.org/publicdomain/zero/1.0/",
+    "description": "Cinematic atmospheric drone for film trailers."
+  },
+  "files": [
+    {
+      "name": "drone-soundscape.mp3",
+      "format": "VBR MP3",
+      "size": "3456789",
+      "length": "5:00",
+      "bitrate": "192",
+      "sample_rate": "44100",
+      "channels": "2"
+    }
+  ],
+  "server": "ia800503.us.archive.org",
+  "dir": "/27/items/test-cc0-ambient-003",
+  "workable_servers": ["https://ia800503.us.archive.org"]
+}

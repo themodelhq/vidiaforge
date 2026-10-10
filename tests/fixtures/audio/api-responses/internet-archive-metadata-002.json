@@ -1,0 +1,24 @@
+{
+  "metadata": {
+    "identifier": "test-public-domain-track-002",
+    "title": "Public Domain Track (Fixture)",
+    "creator": "Fixture Artist Two",
+    "date": "2022-06-10T00:00:00Z",
+    "licenseurl": "https://creativecommons.org/publicdomain/mark/1.0/",
+    "description": "A calm relaxing ambient piece."
+  },
+  "files": [
+    {
+      "name": "ambient-piece.mp3",
+      "format": "VBR MP3",
+      "size": "2345678",
+      "length": "204",
+      "bitrate": "192",
+      "sample_rate": "44100",
+      "channels": "2"
+    }
+  ],
+  "server": "ia800502.us.archive.org",
+  "dir": "/27/items/test-public-domain-track-002",
+  "workable_servers": ["https://ia800502.us.archive.org"]
+}

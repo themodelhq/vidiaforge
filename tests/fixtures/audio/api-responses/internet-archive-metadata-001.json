@@ -1,0 +1,30 @@
+{
+  "metadata": {
+    "identifier": "test-cc-by-album-001",
+    "title": "Test CC-BY Album (Fixture)",
+    "creator": "Fixture Artist One",
+    "date": "2023-01-15T00:00:00Z",
+    "licenseurl": "https://creativecommons.org/licenses/by/4.0/",
+    "description": "Upbeat instrumental track suitable for product promotion and travel videos."
+  },
+  "files": [
+    {
+      "name": "track01.mp3",
+      "format": "VBR MP3",
+      "size": "1234567",
+      "length": "3:24",
+      "bitrate": "192",
+      "sample_rate": "44100",
+      "channels": "2"
+    },
+    {
+      "name": "track01_flac.flac",
+      "format": "Flac",
+      "size": "23456789",
+      "length": "3:24"
+    }
+  ],
+  "server": "ia800501.us.archive.org",
+  "dir": "/27/items/test-cc-by-album-001",
+  "workable_servers": ["https://ia800501.us.archive.org"]
+}
