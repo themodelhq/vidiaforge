@@ -172,18 +172,35 @@ export async function POST(req: Request) {
       );
     }
 
-    console.error('[auth/register] account creation failed:', {
-      message: getErrorMessage(error),
-    });
+    
+const diagnosticError =
+  error && typeof error === 'object'
+    ? (error as { name?: unknown; code?: unknown })
+    : {};
 
-    return jsonError(
-      'Unable to create your account right now. Please try again shortly.',
-      500,
-      {
-        code: 'REGISTRATION_FAILED',
-      },
-    );
-  }
+console.error('[auth/register] account creation failed:', {
+  name: diagnosticError.name,
+  code: diagnosticError.code,
+  message: getErrorMessage(error),
+});
+
+return jsonError(
+  'Unable to create your account right now. Please try again shortly.',
+  500,
+  {
+    code: 'REGISTRATION_FAILED',
+    diagnostic: {
+      errorType:
+        typeof diagnosticError.name === 'string'
+          ? diagnosticError.name
+          : typeof error,
+      databaseCode:
+        typeof diagnosticError.code === 'string'
+          ? diagnosticError.code
+          : null,
+    },
+  },
+);
 
   // ---------------------------------------------------------------------------
   // Create session
