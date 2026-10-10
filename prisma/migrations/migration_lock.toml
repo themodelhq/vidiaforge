@@ -1,4 +1,0 @@
-# Prisma migration lock — declares the provider for this migration history.
-# Production uses `prisma migrate deploy` against PostgreSQL.
-# Do NOT change this to "sqlite" — production runs on PostgreSQL.
-provider = "postgresql"
