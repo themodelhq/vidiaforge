@@ -198,6 +198,9 @@ return jsonError(
         typeof diagnosticError.code === 'string'
           ? diagnosticError.code
           : null,
+      message: getErrorMessage(error)
+  .replace(/postgres(?:ql)?:\/\/[^\s]+/gi, '[DATABASE_URL_REDACTED]')
+  .slice(0, 500),
     },
   },
 );
