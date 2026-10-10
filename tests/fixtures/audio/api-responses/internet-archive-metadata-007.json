@@ -1,0 +1,24 @@
+{
+  "metadata": {
+    "identifier": "test-cc-by-cinematic-007",
+    "title": "Cinematic Film Score (Fixture)",
+    "creator": "Fixture Composer Seven",
+    "date": "2024-01-08T00:00:00Z",
+    "licenseurl": "https://creativecommons.org/licenses/by/4.0/",
+    "description": "Epic orchestral trailer music for cinematic content."
+  },
+  "files": [
+    {
+      "name": "cinematic-score.mp3",
+      "format": "VBR MP3",
+      "size": "4567890",
+      "length": "2:48",
+      "bitrate": "192",
+      "sample_rate": "44100",
+      "channels": "2"
+    }
+  ],
+  "server": "ia800507.us.archive.org",
+  "dir": "/27/items/test-cc-by-cinematic-007",
+  "workable_servers": ["https://ia800507.us.archive.org"]
+}
