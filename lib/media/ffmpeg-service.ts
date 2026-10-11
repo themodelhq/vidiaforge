@@ -5,7 +5,7 @@
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { mkdtemp, writeFile, readFile, unlink, mkdir } from 'fs/promises';
+import { mkdtemp, writeFile, readFile, unlink, mkdir, stat } from 'fs/promises';
 import { createReadStream } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
@@ -113,18 +113,38 @@ export class FFmpegMediaProcessor implements MediaProcessor {
     const width = Math.max(64, input.width ?? 640);
     const { dir, full } = await tmpFile('.jpg');
     try {
-      // -ss before -i is fast seek; -vframes 1 grabs a single frame.
-      await execFileP(
-        ffmpeg,
-        [
-          '-y', '-ss', String(atTime), '-i', input.inputPath,
-          '-vframes', '1',
-          '-vf', `scale=${width}:-1`,
-          '-q:v', '3',
-          full,
-        ],
-        { maxBuffer: MAX_BUFFER }
-      );
+      // Static images must not be seeked: -ss against a still image can make
+      // FFmpeg exit without writing a frame. For video, place -ss after -i so
+      // very short clips are decoded correctly instead of seeking past them.
+      const ext = path.extname(input.inputPath).toLowerCase();
+      const isStillImage = new Set([
+        '.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif', '.tif', '.tiff', '.avif',
+      ]).has(ext);
+      const args = [
+        '-y',
+        '-i', input.inputPath,
+        ...(isStillImage ? [] : ['-ss', String(atTime)]),
+        '-frames:v', '1',
+        '-vf', `scale=${width}:-1`,
+        '-q:v', '3',
+        full,
+      ];
+      await execFileP(ffmpeg, args, { maxBuffer: MAX_BUFFER });
+
+      // Do not assume a successful FFmpeg exit guarantees an output file.
+      // Fail with a useful diagnostic before attempting to upload an empty
+      // or missing thumbnail.
+      let outputSize = 0;
+      try {
+        outputSize = (await stat(full)).size;
+      } catch {
+        throw new Error(
+          `FFmpeg exited without creating thumbnail output for ${input.inputPath} (input extension: ${ext || 'unknown'}).`
+        );
+      }
+      if (outputSize <= 0) {
+        throw new Error(`FFmpeg created an empty thumbnail for ${input.inputPath}.`);
+      }
       const buf = await readFile(full);
       const storage = getStorage();
       await storage.putObject({
