@@ -42,9 +42,12 @@ export async function processMediaIngestion(job: any): Promise<void> {
     const asset = await db.mediaAsset.findUnique({ where: { id: assetId } });
     if (!asset) {
       // Queue messages can outlive deleted assets. There is no DB row to
-      // update and retrying cannot repair this, so acknowledge the orphan.
-      console.warn(`[media-ingestion] orphan queue job ${job.id ?? 'unknown'} references missing asset ${assetId}; skipping`);
-      return;
+      // update and retrying cannot repair this. Mark the queue job as
+      // non-retryable, but keep it failed/observable rather than completed.
+      const message = `Asset ${assetId} not found in DB (orphan media-ingestion queue job)`;
+      console.error(`[media-ingestion] ${message}; queueJobId=${job.id ?? 'unknown'}`);
+      if (typeof job.discard === 'function') job.discard();
+      throw new Error(message);
     }
 
     // === Idempotency ===
