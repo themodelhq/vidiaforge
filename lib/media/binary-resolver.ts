@@ -105,8 +105,10 @@ async function tryCandidate(
         maxBuffer: 16 * 1024 * 1024,
       });
       const filterList = `${stdout}\n${stderr}`;
-      const filterPattern = new RegExp(`\\\\b${requiredFilter}\\\\b`);
-      if (!filterPattern.test(filterList)) {
+      const hasRequiredFilter = filterList.split(/\\r?\\n/).some((line) =>
+        line.trim().split(/\\s+/).includes(requiredFilter)
+      );
+      if (!hasRequiredFilter) {
         console.warn(
           `[media:binary-resolver] rejecting ffmpeg ${p}: required filter '${requiredFilter}' is unavailable`
         );
