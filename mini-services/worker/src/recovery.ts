@@ -278,8 +278,176 @@ export async function recoverStaleJobs(
   return stats;
 }
 
+
+
+export interface RenderRecoveryOptions {
+  /** Override the render lease cutoff (default: RENDER_JOB_STALE_AFTER_MS or 30 minutes). */
+  leaseMs?: number;
+  /** If true, recover the DB row without sending a BullMQ message (tests only). */
+  skipRequeue?: boolean;
+  /** Optional logger. */
+  log?: (msg: string) => void;
+}
+
 /**
- * Recovery scheduler — periodically invokes recoverStaleJobs().
+ * Recover abandoned RenderJobs. The AIJob sweep above cannot recover render
+ * rows: they use a different Prisma model, queue, and lease timestamps.
+ *
+ * Each row is claimed for recovery with an atomic conditional update that
+ * includes the observed lease fields. If a live worker refreshes its heartbeat
+ * after the scan, the conditional update affects zero rows and recovery skips
+ * it. Only successfully transitioned rows are enqueued to BullMQ.
+ */
+export async function recoverStaleRenderJobs(
+  db: PrismaClient,
+  options: RenderRecoveryOptions = {}
+): Promise<RecoveryStats> {
+  const log = options.log ?? ((message: string) => console.log(message));
+  const stats: RecoveryStats = {
+    scanned: 0,
+    recovered: 0,
+    requeued: 0,
+    skipped: 0,
+    errors: [],
+    recoveredJobIds: [],
+  };
+  const leaseMs =
+    options.leaseMs ??
+    Number.parseInt(process.env.RENDER_JOB_STALE_AFTER_MS || String(30 * 60_000), 10);
+  const staleCutoff = new Date(Date.now() - Math.max(1_000, leaseMs));
+  const activeStatuses = ['preparing', 'processing', 'encoding', 'uploading'];
+  const staleClause = {
+    OR: [
+      { heartbeatAt: { lt: staleCutoff } },
+      { heartbeatAt: { equals: null }, startedAt: { lt: staleCutoff } },
+    ],
+  };
+
+  try {
+    const candidates = await db.renderJob.findMany({
+      where: { status: { in: activeStatuses }, ...staleClause },
+      select: {
+        id: true,
+        status: true,
+        stage: true,
+        progress: true,
+        workerId: true,
+        attemptId: true,
+        heartbeatAt: true,
+        startedAt: true,
+        completedAt: true,
+      },
+    });
+    stats.scanned = candidates.length;
+    log(
+      `[render-recovery] scanning RenderJobs — leaseMs=${leaseMs} staleCutoff=${staleCutoff.toISOString()} found=${candidates.length}`
+    );
+
+    if (candidates.length === 0) {
+      log('[render-recovery] no stale RenderJobs found');
+      return stats;
+    }
+
+    const { enqueue } = options.skipRequeue
+      ? { enqueue: null as null | ((queueName: any, data: unknown) => Promise<any>) }
+      : await import(`${lib}/queue`);
+    const { QUEUE_NAMES } = options.skipRequeue
+      ? { QUEUE_NAMES: { RENDER: 'render' } }
+      : await import(`${lib}/queue-names`);
+
+    for (const candidate of candidates) {
+      // Match the exact lease observed during the scan. This prevents a stale
+      // sweep from taking ownership away from a worker that heartbeated meanwhile.
+      const claimed = await db.renderJob.updateMany({
+        where: {
+          id: candidate.id,
+          status: candidate.status,
+          workerId: candidate.workerId,
+          attemptId: candidate.attemptId,
+          heartbeatAt: candidate.heartbeatAt,
+          startedAt: candidate.startedAt,
+          ...staleClause,
+        },
+        data: {
+          status: 'queued',
+          stage: 'queued',
+          progress: 0,
+          error: 'Render worker lease expired; job re-queued for retry.',
+          workerId: null,
+          attemptId: null,
+          heartbeatAt: null,
+          startedAt: null,
+          completedAt: null,
+        },
+      });
+
+      if (claimed.count !== 1) {
+        stats.skipped++;
+        log(`[render-recovery] skipped ${candidate.id} — lease changed or job is no longer active`);
+        continue;
+      }
+      stats.recovered++;
+
+      if (options.skipRequeue) {
+        stats.recoveredJobIds.push(candidate.id);
+        continue;
+      }
+
+      const enqueued = await enqueue!(QUEUE_NAMES.RENDER, { jobId: candidate.id });
+      if (enqueued.ok) {
+        stats.requeued++;
+        stats.recoveredJobIds.push(candidate.id);
+        log(`[render-recovery] requeued RenderJob ${candidate.id} → BullMQ jobId=${enqueued.jobId ?? 'unknown'}`);
+        continue;
+      }
+
+      const error = `BullMQ requeue failed: ${enqueued.error || 'unknown queue error'}`;
+      stats.errors.push(`RenderJob ${candidate.id}: ${error}`);
+      log(`[render-recovery] FAILED to requeue RenderJob ${candidate.id}: ${error}`);
+
+      // Restore the stale lease only if no new worker has claimed the row.
+      // It remains eligible for a later sweep; never overwrite a live attempt.
+      const rollback = await db.renderJob.updateMany({
+        where: {
+          id: candidate.id,
+          status: 'queued',
+          workerId: null,
+          attemptId: null,
+          heartbeatAt: null,
+          startedAt: null,
+          error: 'Render worker lease expired; job re-queued for retry.',
+        },
+        data: {
+          status: candidate.status,
+          stage: candidate.stage,
+          progress: candidate.progress,
+          error,
+          workerId: candidate.workerId,
+          attemptId: candidate.attemptId,
+          heartbeatAt: candidate.heartbeatAt,
+          startedAt: candidate.startedAt,
+          completedAt: candidate.completedAt,
+        },
+      });
+      if (rollback.count !== 1) {
+        stats.skipped++;
+        log(`[render-recovery] rollback skipped for ${candidate.id} — another worker changed the row`);
+      }
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    stats.errors.push(`render recovery fatal: ${message}`);
+    log(`[render-recovery] FATAL: ${message}`);
+  }
+
+  log(
+    `[render-recovery] complete — scanned=${stats.scanned} recovered=${stats.recovered} requeued=${stats.requeued} skipped=${stats.skipped} errors=${stats.errors.length}`
+  );
+  return stats;
+}
+
+/**
+ * Recovery scheduler — periodically invokes AIJob and RenderJob recovery.
  *
  * Used by the worker to recover jobs whose workers crashed mid-processing.
  * The scheduler is intentionally simple: setInterval + try/catch so a single
@@ -301,6 +469,7 @@ export function startRecoveryScheduler(
     if (stopped) return;
     try {
       await recoverStaleJobs(db, { log: (m) => console.log(m) });
+      await recoverStaleRenderJobs(db, { log: (m) => console.log(m) });
     } catch (err) {
       console.error(
         '[recovery:scheduler] pass failed:',
