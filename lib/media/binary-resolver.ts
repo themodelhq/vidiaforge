@@ -103,8 +103,8 @@ async function tryCandidate(
         maxBuffer: 16 * 1024 * 1024,
       });
       const filterList = `${stdout}\n${stderr}`;
-      const hasRequiredFilter = filterList.split(/\\r?\\n/).some((line) =>
-        line.trim().split(/\\s+/).includes(requiredFilter)
+      const hasRequiredFilter = filterList.split(/\r?\n/).some((line) =>
+        line.trim().split(/\s+/).includes(requiredFilter)
       );
       if (!hasRequiredFilter) {
         console.warn(
