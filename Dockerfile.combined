@@ -86,10 +86,195 @@ RUN apk add --no-cache \
     wget \
     libc6-compat
 
-# FFmpeg must be operational for media processing.
-RUN ffmpeg -version && \
-    ffprobe -version && \
-    echo "FFmpeg and FFprobe verified."
+# Force the resolver to use the Alpine system binaries. The npm
+# ffmpeg-static build is not guaranteed to include drawtext, even when
+# its build configuration lists font libraries.
+ENV FFMPEG_PATH=/usr/bin/ffmpeg
+ENV FFPROBE_PATH=/usr/bin/ffprobe
+
+# Fail the image build unless the exact production binaries support real text
+# rendering, H.264 encoding, and FFprobe inspection.
+RUN set -eu; \
+    test -x "$FFMPEG_PATH"; \
+    test -x "$FFPROBE_PATH"; \
+    "$FFMPEG_PATH" -version; \
+    "$FFPROBE_PATH" -version; \
+    "$FFMPEG_PATH" -hide_banner -filters 2>&1 | grep -E '[[:space:]]drawtext[[:space:]]'; \
+    FONT_FILE="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"; \
+    if [ -z "$FONT_FILE" ]; then echo "ERROR: DejaVuSans.ttf not found"; exit 1; fi; \
+    "$FFMPEG_PATH" -hide_banner -loglevel error -f lavfi -i color=c=black:s=320x240:d=1 \
+      -vf "drawtext=fontfile=$FONT_FILE:text=VidiaForge:fontsize=24:fontcolor=white:x=10:y=10" \
+      -frames:v 1 -c:v libx264 -pix_fmt yuv420p -y /tmp/vidiaforge-drawtext-smoke.mp4; \
+    "$FFPROBE_PATH" -v error -select_streams v:0 -show_entries stream=codec_name,width,height \
+      -of csv=p=0 /tmp/vidiaforge-drawtext-smoke.mp4 | grep -q '^h264,320,240
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV WORKER_CONCURRENCY=1
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+ENV TEMP_DIR=/app/tmp
+ENV UPLOAD_DIR=/app/uploads
+
+# Non-root runtime account.
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+# ─── Copy Next.js build artifacts ────────────────────────────────────────────
+COPY --from=build --chown=nextjs:nodejs \
+    /app/.next/standalone ./
+
+COPY --from=build --chown=nextjs:nodejs \
+    /app/.next/static ./.next/static
+
+COPY --from=build --chown=nextjs:nodejs \
+    /app/public ./public
+
+COPY --from=build --chown=nextjs:nodejs \
+    /app/prisma ./prisma
+
+COPY --from=build --chown=nextjs:nodejs \
+    /app/package.json ./package.json
+
+# ─── Copy worker and shared source ───────────────────────────────────────────
+COPY --from=build --chown=nextjs:nodejs \
+    /app/mini-services ./mini-services
+
+COPY --from=build --chown=nextjs:nodejs \
+    /app/lib ./lib
+
+COPY --from=build --chown=nextjs:nodejs \
+    /app/stores ./stores
+
+COPY --from=build --chown=nextjs:nodejs \
+    /app/src ./src
+
+# Copy the production-pruned root dependencies, including generated Prisma
+# client files.
+COPY --from=build --chown=nextjs:nodejs \
+    /app/node_modules ./node_modules
+
+# ─── CRITICAL: Merge worker dependencies; never suppress errors ──────────────
+#
+# Do not replace this with "|| echo WARNING".
+# A missing or failed dependency merge must fail the Docker build.
+#
+# The worker package tree is merged into root node_modules so shared modules
+# imported from /app/lib and /app/src can resolve worker dependencies.
+#
+# cp -a preserves file attributes and symlinks; the "/." source includes
+# hidden entries such as Bun's internal dependency directory.
+
+RUN set -eu; \
+    WORKER_MODULES="/app/mini-services/worker/node_modules"; \
+    ROOT_MODULES="/app/node_modules"; \
+    \
+    if [ ! -d "$WORKER_MODULES" ]; then \
+        echo "ERROR: worker node_modules directory is missing."; \
+        exit 1; \
+    fi; \
+    \
+    if [ -z "$(find "$WORKER_MODULES" -mindepth 1 -maxdepth 1 -print -quit)" ]; then \
+        echo "ERROR: worker node_modules directory is empty."; \
+        exit 1; \
+    fi; \
+    \
+    if [ ! -d "$ROOT_MODULES" ]; then \
+        echo "ERROR: root node_modules directory is missing."; \
+        exit 1; \
+    fi; \
+    \
+    echo "Merging worker dependencies into root node_modules..."; \
+    cp -a "$WORKER_MODULES"/. "$ROOT_MODULES"/; \
+    \
+    echo "Verifying required worker dependencies..."; \
+    for package in \
+        "@aws-sdk/client-s3" \
+        "@aws-sdk/lib-storage" \
+        "@aws-sdk/s3-request-presigner" \
+        "@prisma/client" \
+        "bullmq" \
+        "ffmpeg-static" \
+        "ffprobe-static" \
+        "ioredis" \
+        "z-ai-web-dev-sdk" \
+        "zod"; \
+    do \
+        package_file="$ROOT_MODULES/$package/package.json"; \
+        if [ ! -f "$package_file" ]; then \
+            echo "ERROR: Required runtime dependency is missing: $package"; \
+            exit 1; \
+        fi; \
+    done; \
+    \
+    echo "Verifying Prisma client artifacts..."; \
+    if [ ! -d "$ROOT_MODULES/.prisma/client" ]; then \
+        echo "ERROR: Generated Prisma client is missing."; \
+        exit 1; \
+    fi; \
+    \
+    echo "Worker dependency merge and verification completed successfully."
+
+# The worker dependency tree can contain an ungenerated Prisma client stub.
+# Restore the generated Prisma runtime artifacts from the build stage AFTER
+# merging worker dependencies, so the worker merge cannot overwrite them.
+COPY --from=build --chown=nextjs:nodejs \
+    /app/node_modules/@prisma/client /app/node_modules/@prisma/client
+
+COPY --from=build --chown=nextjs:nodejs \
+    /app/node_modules/.prisma/client /app/node_modules/.prisma/client
+
+# The worker starts with cwd=/app/mini-services/worker, so Bun/Node can resolve
+# a worker-local @prisma/client before checking /app/node_modules. Remove only
+# the worker-local Prisma client entrypoints so imports resolve to the generated
+# root client restored above. Keep the worker's Prisma CLI and all other deps.
+RUN set -eu; \
+    rm -rf /app/mini-services/worker/node_modules/@prisma/client \
+           /app/mini-services/worker/node_modules/.prisma; \
+    echo "Verifying Prisma resolves from the worker package directory..."; \
+    cd /app/mini-services/worker; \
+    bun -e 'import { PrismaClient } from "@prisma/client"; if (typeof PrismaClient !== "function") process.exit(1); console.log("[PASS] Worker resolves generated root Prisma Client");'
+
+# ─── Runtime directories ─────────────────────────────────────────────────────
+RUN mkdir -p /app/uploads /app/tmp /app/cache && \
+    chown -R nextjs:nodejs \
+        /app/uploads \
+        /app/tmp \
+        /app/cache \
+        /app/node_modules \
+        /app/mini-services \
+        /app/lib \
+        /app/stores \
+        /app/src
+
+# ─── Final image verification ────────────────────────────────────────────────
+RUN set -eu; \
+    echo "[verify] Checking worker entrypoint..."; \
+    if [ -f /app/mini-services/worker/src/index.ts ]; then echo "[PASS] worker entrypoint"; else echo "[FAIL] missing /app/mini-services/worker/src/index.ts"; ls -la /app/mini-services/worker/src || true; exit 1; fi; \
+    echo "[verify] Checking worker package manifest..."; \
+    if [ -f /app/mini-services/worker/package.json ]; then echo "[PASS] worker package manifest"; else echo "[FAIL] missing /app/mini-services/worker/package.json"; ls -la /app/mini-services/worker || true; exit 1; fi; \
+    echo "[verify] Checking root package manifest..."; \
+    if [ -f /app/package.json ]; then echo "[PASS] root package manifest"; else echo "[FAIL] missing /app/package.json"; ls -la /app || true; exit 1; fi; \
+    echo "[verify] Checking Next standalone server at its copied runtime path..."; \
+    if [ -f /app/server.js ]; then echo "[PASS] Next standalone server: /app/server.js"; else echo "[FAIL] missing /app/server.js (standalone contents should be copied into /app)"; ls -la /app || true; exit 1; fi; \
+    echo "[verify] Checking Next static assets..."; \
+    if [ -d /app/.next/static ]; then echo "[PASS] Next static assets"; else echo "[FAIL] missing /app/.next/static"; ls -la /app/.next || true; exit 1; fi; \
+    echo "[verify] Checking ffmpeg executable..."; \
+    if command -v ffmpeg >/dev/null 2>&1; then echo "[PASS] ffmpeg: $(command -v ffmpeg)"; else echo "[FAIL] ffmpeg is not on PATH"; exit 1; fi; \
+    echo "[verify] Checking ffprobe executable..."; \
+    if command -v ffprobe >/dev/null 2>&1; then echo "[PASS] ffprobe: $(command -v ffprobe)"; else echo "[FAIL] ffprobe is not on PATH"; exit 1; fi; \
+    echo "VidiaForge worker runtime files verified."
+
+USER nextjs
+
+EXPOSE 3000 3001
+
+# Start the Next.js API and BullMQ worker under one supervisor.
+CMD ["bun", "run", "mini-services/worker/src/combined-start.ts"]; \
+    rm -f /tmp/vidiaforge-drawtext-smoke.mp4; \
+    echo "[PASS] Production FFmpeg supports drawtext, DejaVu fonts, libx264, and FFprobe."
 
 RUN mkdir -p /usr/share/fonts/truetype/dejavu && \
     test -n "$(find /usr/share/fonts -type f -iname '*dejavu*' -print -quit)" && \
