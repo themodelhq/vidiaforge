@@ -1,15 +1,13 @@
 // VidiaForge — Media binary resolver (FFmpeg + FFprobe)
 //
-// Resolves the `ffmpeg` and `ffprobe` executable paths in priority order:
-//   1. FFMPEG_PATH / FFPROBE_PATH env vars (explicit override — wins if set)
-//   2. ffmpeg-static / ffprobe-static npm packages (dynamic import, try/catch)
-//   3. System PATH (via `which ffmpeg` on Unix — the `which` BINARY, not the
-//      `command` shell builtin which cannot be exec'd with shell:false)
-//      On Windows: `where ffmpeg` (the Windows built-in `where.exe`).
-//      Fallback: `/bin/sh -lc 'command -v ffmpeg'` if `which` is missing
-//      (e.g. on Alpine, which installs `which` in the `which` apk package but
-//      not by default).
-//   4. Common container paths: /usr/bin/ffmpeg, /usr/local/bin/ffmpeg, ...
+// Resolves executable paths in priority order:
+//   FFmpeg: explicit FFMPEG_PATH (if it supports drawtext), system PATH, then
+//           ffmpeg-static, then common container paths. Every candidate is
+//           checked for drawtext because timeline text overlays require it.
+//   FFprobe: explicit FFPROBE_PATH, ffprobe-static, system PATH, then common
+//            container paths.
+// System PATH lookup uses the `which` binary (not the `command` shell builtin),
+// with `/bin/sh -lc 'command -v ...'` as a fallback if `which` is unavailable.
 //
 // On first successful resolution, logs the path + version line.
 // Memoizes the result so subsequent calls are free.
