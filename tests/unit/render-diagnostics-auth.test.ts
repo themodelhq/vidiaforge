@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { isDiagnosticsBearerAuthorized } from '../../src/lib/render/diagnostics-auth';
+import { isDiagnosticsBearerAuthorized } from '../../lib/render/diagnostics-auth';
 
 describe('isDiagnosticsBearerAuthorized', () => {
   const token = 'test-render-diagnostics-token';
