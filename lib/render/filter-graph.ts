@@ -585,6 +585,19 @@ export function buildFilterGraph(
     videoChainMeta.push({ clip, track: project.tracks.find((t) => t.id === clip.trackId)!, endId: cur });
   }
 
+  // A text/caption-only timeline still needs a real video stream for
+  // drawtext. Create the black canvas BEFORE building text/caption nodes so
+  // those filters can chain from a valid video input. Creating it later in
+  // the final-compositing section leaves drawtext with no input pad.
+  if (videoChainEnds.length === 0) {
+    const blackId = label('vblk');
+    nodes.push({
+      id: blackId, inputs: [], type: 'source',
+      assetId: '__black__', storageKey: '__black__', kind: 'image',
+    });
+    videoChainEnds.push(blackId);
+  }
+
   // === AUDIO chains ===
   for (const { clip } of audioClips) {
     const asset = clip.assetId ? assetsById[clip.assetId] : undefined;
