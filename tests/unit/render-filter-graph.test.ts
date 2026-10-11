@@ -257,6 +257,42 @@ describe('buildFilterGraph — text overlay', () => {
     expect(textNodes[0].end).toBe(3);
   });
 
+  test('text-only timeline chains drawtext onto a black video source', () => {
+    const doc = emptyProjectDocument('proj1', 'Text-only');
+    const textTrack = doc.tracks.find((t) => t.kind === 'text')!;
+    doc.clips.push(
+      createClip({
+        trackId: textTrack.id,
+        kind: 'text',
+        duration: 3,
+        timelineStart: 0,
+        text: {
+          text: 'Wait for it',
+          fontFamily: 'Inter',
+          fontSize: 48,
+          fontWeight: 700,
+          italic: false,
+          letterSpacing: 0,
+          lineHeight: 1.2,
+          align: 'center',
+          color: '#FFFFFF',
+        },
+      })
+    );
+
+    const graph = buildFilterGraph(doc, {});
+    const blackSource = graph.nodes.find(
+      (n) => n.type === 'source' && (n as SourceNode).assetId === '__black__'
+    );
+    const textNode = graph.nodes.find((n) => n.type === 'text') as TextNode | undefined;
+
+    expect(blackSource).toBeDefined();
+    expect(textNode).toBeDefined();
+    expect(textNode!.inputs).toEqual([blackSource!.id]);
+    expect(graph.nodes.findIndex((n) => n.id === blackSource!.id))
+      .toBeLessThan(graph.nodes.findIndex((n) => n.id === textNode!.id));
+  });
+
   test('text clip start/end times are computed from timelineStart + duration', () => {
     const doc = emptyProjectDocument('proj1', 'Test');
     const textTrack = doc.tracks.find((t) => t.kind === 'text')!;
