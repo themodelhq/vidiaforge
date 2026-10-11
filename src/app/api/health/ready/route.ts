@@ -1,72 +1,114 @@
 // /api/health/ready — Readiness check for the API container.
 //
-// Returns 200 if the API is ready to serve requests (DB + environment + storage
-// all OK). Returns 503 if any required dependency is unavailable so the load
-// balancer stops routing traffic to this instance.
-//
-// V5: Storage readiness now ACTUALLY TESTS storage connectivity (not just
-// that the provider object can be constructed). For S3/R2, this does a
-// HeadBucket-equivalent check. For local storage, it verifies the upload
-// directory exists + is writable.
-//
-// The result distinguishes:
-//   CONFIGURED — provider is configured with credentials
-//   ACCESSIBLE — provider responded to a real authorization check
-//   UNAVAILABLE — provider is not configured or the check failed
-//
-// FFmpeg is NOT checked here — it's a WORKER-ONLY dependency. The API container
-// does not need FFmpeg. See /api/health/route.ts for the rationale.
+// Returns 200 when the database, environment, and required storage are ready.
+// Returns 503 when a required dependency is unavailable. Queue availability is
+// reported but remains non-blocking for API readiness.
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { validateEnv } from '@/lib/env-validation';
 import { isQueueAvailable } from '@/lib/queue';
 import { getStorage } from '@/lib/storage';
 
-async function checkStorageReadiness(): Promise<{ status: 'ok' | 'error'; detail: string; accessible: boolean }> {
+type StorageReadiness = {
+  status: 'ok' | 'error';
+  detail: string;
+  accessible: boolean;
+};
+
+async function checkStorageReadiness(): Promise<StorageReadiness> {
+  let providerName = 'unknown';
+
   try {
     const storage = getStorage();
+    providerName = storage.name;
 
-    // V7 §33: Use the real checkHealth() method — performs an actual
-    // authorized operation (HeadBucket for S3/R2, fs.access W_OK for local).
-    // This is the REAL readiness check, not just "provider object constructed".
-    const healthy = await storage.checkHealth();
-    if (healthy) {
-      return { status: 'ok', detail: `${storage.name} (accessible)`, accessible: true };
-    } else {
-      return { status: 'error', detail: `${storage.name} (configured but inaccessible)`, accessible: false };
+    const accessible = await storage.checkHealth();
+
+    if (accessible) {
+      return {
+        status: 'ok',
+        detail: `${providerName} (accessible)`,
+        accessible: true,
+      };
     }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { status: 'error', detail: `not configured: ${msg}`, accessible: false };
+
+    // The storage provider logs the sanitized failure classification.
+    // Do not expose credentials or raw SDK exceptions in this response.
+    return {
+      status: 'error',
+      detail: `${providerName} (configured but inaccessible; inspect server logs)`,
+      accessible: false,
+    };
+  } catch (error: unknown) {
+    const errorName =
+      error instanceof Error ? error.name : 'UnknownError';
+
+    console.error(
+      JSON.stringify({
+        event: 'storage.readiness_initialization_failed',
+        provider: providerName,
+        errorName,
+      })
+    );
+
+    return {
+      status: 'error',
+      detail: `${providerName} (storage initialization failed; inspect server logs)`,
+      accessible: false,
+    };
   }
 }
 
 export async function GET() {
-  const checks: Record<string, { status: 'ok' | 'error' | 'degraded'; detail?: string; accessible?: boolean }> = {};
+  const checks: Record<
+    string,
+    {
+      status: 'ok' | 'error' | 'degraded';
+      detail?: string;
+      accessible?: boolean;
+    }
+  > = {};
 
   // 1. Environment validation
   const envResult = validateEnv();
   checks.environment = {
     status: envResult.valid ? 'ok' : 'error',
-    detail: envResult.valid ? `${envResult.env} mode` : envResult.errors.join('; '),
+    detail: envResult.valid
+      ? `${envResult.env} mode`
+      : envResult.errors.join('; '),
   };
 
-  // 2. Database (required)
+  // 2. Database
   try {
     await db.user.count();
     checks.database = { status: 'ok' };
-  } catch (err) {
-    checks.database = { status: 'error', detail: err instanceof Error ? err.message : String(err) };
+  } catch {
+    console.error(
+      JSON.stringify({
+        event: 'health.database_check_failed',
+      })
+    );
+
+    checks.database = {
+      status: 'error',
+      detail: 'database unavailable; inspect server logs',
+    };
   }
 
-  // 3. Redis queue (recommended but NOT blocking for readiness — only for render)
-  const queueOk = await isQueueAvailable();
+  // 3. Redis queue
+  let queueOk = false;
+  try {
+    queueOk = await isQueueAvailable();
+  } catch {
+    queueOk = false;
+  }
+
   checks.queue = {
     status: queueOk ? 'ok' : 'degraded',
-    detail: queueOk ? 'connected' : 'not configured (render/transcription unavailable, reads still serve)',
+    detail: queueOk ? 'connected' : 'not configured or unavailable',
   };
 
-  // 4. Storage (required) — V5: ACTUALLY test connectivity
+  // 4. Required storage dependency
   const storageResult = await checkStorageReadiness();
   checks.storage = {
     status: storageResult.status,
@@ -74,16 +116,19 @@ export async function GET() {
     accessible: storageResult.accessible,
   };
 
-  // Overall readiness: DB + environment + storage must pass. Queue is recommended
-  // but not blocking for readiness (only for render/transcription functionality).
+  // Preserve the existing readiness policy: database, environment, and
+  // storage must pass. Queue remains degraded rather than blocking readiness.
   const ready =
     checks.database.status === 'ok' &&
     checks.environment.status === 'ok' &&
     checks.storage.status === 'ok';
 
-  const status = ready ? 'ready' : 'not_ready';
   return NextResponse.json(
-    { status, checks, time: new Date().toISOString() },
+    {
+      status: ready ? 'ready' : 'not_ready',
+      checks,
+      time: new Date().toISOString(),
+    },
     { status: ready ? 200 : 503 }
   );
 }
