@@ -31,17 +31,21 @@ const workerInstanceId = `worker-${randomUUID()}`;
 // V4: Heartbeat interval — update processingHeartbeatAt periodically so the
 // stale-job recovery can detect crashed workers.
 const HEARTBEAT_INTERVAL_MS = parseInt(process.env.WORKER_HEARTBEAT_INTERVAL_MS || '20000', 10);
-let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
-
 export async function processMediaIngestion(job: any): Promise<void> {
   const { assetId } = job.data || {};
   if (!assetId) throw new Error('Missing assetId in job data');
 
   const db = new PrismaClient();
   let tmpDir: string | null = null;
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   try {
     const asset = await db.mediaAsset.findUnique({ where: { id: assetId } });
-    if (!asset) throw new Error(`Asset ${assetId} not found in DB`);
+    if (!asset) {
+      // Queue messages can outlive deleted assets. There is no DB row to
+      // update and retrying cannot repair this, so acknowledge the orphan.
+      console.warn(`[media-ingestion] orphan queue job ${job.id ?? 'unknown'} references missing asset ${assetId}; skipping`);
+      return;
+    }
 
     // === Idempotency ===
     // A previously-completed ingestion leaves status='ready'. Don't reprocess
