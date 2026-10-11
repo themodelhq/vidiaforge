@@ -70,11 +70,11 @@ RUN test -f .next/standalone/server.js && \
 # ─── Stage 3: Runtime ────────────────────────────────────────────────────────
 FROM oven/bun:1.3.14-alpine AS runner
 
+# Alpine's ffmpeg package provides both ffmpeg and ffprobe.
+# font-dejavu supplies the actual font files used by the drawtext smoke test.
 RUN apk add --no-cache \
     ffmpeg \
-    ffprobe \
     font-dejavu \
-    ttf-dejavu-core \
     wget \
     libc6-compat
 
