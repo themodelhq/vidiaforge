@@ -41,6 +41,25 @@ export async function GET() {
     });
 
     await redis.ping();
+
+    // Managed Redis providers may disable CONFIG GET. Treat that as
+    // unsupported rather than failing otherwise-useful queue diagnostics.
+    let redisEvictionPolicy: string | null = null;
+    let redisEvictionPolicyCheck: 'ok' | 'warning' | 'unsupported' = 'unsupported';
+    try {
+      const configValues = await redis.config('GET', 'maxmemory-policy');
+      if (Array.isArray(configValues)) {
+        const policyIndex = configValues.findIndex((value: unknown) => value === 'maxmemory-policy');
+        const policy = policyIndex >= 0 ? configValues[policyIndex + 1] : undefined;
+        if (typeof policy === 'string') {
+          redisEvictionPolicy = policy;
+          redisEvictionPolicyCheck = policy === 'noeviction' ? 'ok' : 'warning';
+        }
+      }
+    } catch {
+      redisEvictionPolicyCheck = 'unsupported';
+    }
+
     queue = new Queue(QUEUE_NAMES.RENDER, { connection: redis });
 
     const queueCounts = await queue.getJobCounts(
@@ -78,6 +97,9 @@ export async function GET() {
       : null;
 
     let diagnosis = 'Queue diagnostics collected.';
+    if (redisEvictionPolicyCheck === 'warning') {
+      diagnosis = `Redis maxmemory-policy is ${redisEvictionPolicy}; BullMQ recommends noeviction. Change this in the Redis provider settings.`;
+    }
     if (workerCount === 0) {
       diagnosis = 'No workers are registered for the render queue. Check worker deployment/startup and confirm it uses the same Redis instance and queue name.';
     } else if ((queueCounts.waiting ?? 0) > 0 && (queueCounts.active ?? 0) === 0) {
@@ -92,6 +114,8 @@ export async function GET() {
       queueCounts,
       workerCount,
       workerRegistryCheck,
+      redisEvictionPolicy,
+      redisEvictionPolicyCheck,
       databaseQueuedJobs,
       oldestQueuedAgeSeconds,
       diagnosis,
