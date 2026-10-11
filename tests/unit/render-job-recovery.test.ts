@@ -55,6 +55,42 @@ describe('recoverStaleRenderJobs', () => {
     });
   });
 
+  test('uses a short default lease for orphaned render jobs', async () => {
+    const candidate = {
+      ...makeStaleRenderJob(),
+      heartbeatAt: null,
+      startedAt: new Date(Date.now() - 4 * 60_000),
+    };
+    let scanWhere: any = null;
+    const db = {
+      renderJob: {
+        findMany: async (args: any) => {
+          scanWhere = args.where;
+          return [candidate];
+        },
+        updateMany: async () => ({ count: 1 }),
+      },
+    } as unknown as PrismaClient;
+
+    const previousLease = process.env.RENDER_JOB_STALE_AFTER_MS;
+    delete process.env.RENDER_JOB_STALE_AFTER_MS;
+    try {
+      await recoverStaleRenderJobs(db, {
+        skipRequeue: true,
+        log: () => {},
+      });
+    } finally {
+      if (previousLease === undefined) delete process.env.RENDER_JOB_STALE_AFTER_MS;
+      else process.env.RENDER_JOB_STALE_AFTER_MS = previousLease;
+    }
+
+    const fallbackCutoff = scanWhere.OR.find((condition: any) => condition.startedAt)?.startedAt.lt;
+    expect(fallbackCutoff).toBeInstanceOf(Date);
+    const cutoffAgeMs = Date.now() - fallbackCutoff.getTime();
+    expect(cutoffAgeMs).toBeGreaterThanOrEqual(175_000);
+    expect(cutoffAgeMs).toBeLessThan(200_000);
+  });
+
   test('does not reclaim a lease that changed after the stale scan', async () => {
     const candidate = makeStaleRenderJob();
     let updateCalls = 0;
