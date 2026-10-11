@@ -90,15 +90,32 @@ async function getVersion(p: string): Promise<string> {
 
 async function tryCandidate(
   p: string,
-  source: ResolvedBinary['source']
+  source: ResolvedBinary['source'],
+  requiredFilter?: string
 ): Promise<ResolvedBinary | null> {
   if (!p) return null;
   if (!(await existsExecutable(p))) return null;
   try {
     const version = await getVersion(p);
+    if (requiredFilter) {
+      // Rendering uses drawtext for timeline text overlays. Some bundled
+      // ffmpeg-static builds omit this filter even though `-version` works.
+      // Reject those binaries and continue searching for a capable system FFmpeg.
+      const { stdout, stderr } = await execFileP(p, ['-hide_banner', '-filters'], {
+        maxBuffer: 16 * 1024 * 1024,
+      });
+      const filterList = `${stdout}\n${stderr}`;
+      const filterPattern = new RegExp(`\\\\b${requiredFilter}\\\\b`);
+      if (!filterPattern.test(filterList)) {
+        console.warn(
+          `[media:binary-resolver] rejecting ffmpeg ${p}: required filter '${requiredFilter}' is unavailable`
+        );
+        return null;
+      }
+    }
     return { path: p, version, source };
   } catch {
-    // Binary exists but `-version` failed — treat as broken / unavailable.
+    // Binary exists but version/filter inspection failed — treat it as unavailable.
     return null;
   }
 }
@@ -182,22 +199,24 @@ export async function resolveFfmpeg(): Promise<ResolvedBinary> {
     tried.push(`env FFMPEG_PATH=${process.env.FFMPEG_PATH}`);
   }
 
-  // 2. ffmpeg-static npm package (bundled binary)
-  const staticPath = await loadFfmpegStatic();
-  if (staticPath) {
-    candidates.push({ path: staticPath, source: 'npm-package' });
-    tried.push(`npm package ffmpeg-static → ${staticPath}`);
-  } else {
-    tried.push('npm package ffmpeg-static (not installed)');
-  }
-
-  // 3. System PATH
+  // 2. Prefer system FFmpeg. The container installs Alpine's ffmpeg package,
+  // which includes drawtext; ffmpeg-static may omit that filter and cannot
+  // render timeline text overlays.
   const pathWhich = await whichOnPath('ffmpeg');
   if (pathWhich) {
     candidates.push({ path: pathWhich, source: 'system-path' });
     tried.push(`system PATH → ${pathWhich}`);
   } else {
     tried.push('system PATH (ffmpeg not on PATH)');
+  }
+
+  // 3. npm fallback, accepted only if it exposes the required drawtext filter.
+  const staticPath = await loadFfmpegStatic();
+  if (staticPath) {
+    candidates.push({ path: staticPath, source: 'npm-package' });
+    tried.push(`npm package ffmpeg-static → ${staticPath} (must support drawtext)`);
+  } else {
+    tried.push('npm package ffmpeg-static (not installed)');
   }
 
   // 4. Common container default locations
@@ -207,13 +226,12 @@ export async function resolveFfmpeg(): Promise<ResolvedBinary> {
   }
 
   for (const c of candidates) {
-    const resolved = await tryCandidate(c.path, c.source);
+    const resolved = await tryCandidate(c.path, c.source, 'drawtext');
     if (resolved) {
       ffmpegCache = resolved;
-      // Mirror the resolution into the env var so the legacy
-      // FFmpegMediaProcessor.which() helper (which only reads env / PATH)
-      // uses the same binary — single source of truth.
-      if (!process.env.FFMPEG_PATH) process.env.FFMPEG_PATH = resolved.path;
+      // Mirror the validated resolution into the env var so legacy callers
+      // cannot keep using an explicitly configured but unsupported binary.
+      process.env.FFMPEG_PATH = resolved.path;
       console.log(
         `[media:binary-resolver] ffmpeg → ${resolved.path} (source=${resolved.source}, "${resolved.version}")`
       );
