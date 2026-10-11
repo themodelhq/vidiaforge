@@ -18,7 +18,10 @@ import type {
 
 // We avoid static imports — the SDK is only required at runtime.
 type S3ClientLike = {
-  send: (cmd: unknown) => Promise<unknown>;
+  send: (
+    cmd: unknown,
+    options?: { abortSignal?: AbortSignal }
+  ) => Promise<unknown>;
 };
 
 interface LoadedSdk {
@@ -363,20 +366,155 @@ export class S3StorageProvider implements StorageProvider {
   }
 
   async checkHealth(): Promise<boolean> {
-    // V7 §33: HeadBucket equivalent — verify credentials work.
-    // V17.1: Fix bug — was referencing this.bucket + this.getClient() which
-    // don't exist on the class. Use the existing init() method which returns
-    // the cached client + bucket name from process.env.
+    const startedAt = Date.now();
+    const timeoutMs = 8000;
+    let operation = 'configuration';
+    let endpointHost: string | undefined;
+
+    const logFailure = (
+      errorCode: string,
+      httpStatus?: number,
+      requestId?: string,
+      retryable = false
+    ) => {
+      // Never log credentials, raw SDK messages, signed URLs, or headers.
+      console.error(
+        JSON.stringify({
+          event: 'storage.health_check_failed',
+          provider: this.name,
+          operation,
+          errorCode,
+          httpStatus,
+          requestId,
+          retryable,
+          endpointHost,
+          durationMs: Date.now() - startedAt,
+        })
+      );
+    };
+
     try {
-      const { sdk, client, bucket } = await this.init();
+      const provider = (process.env.STORAGE_PROVIDER || 'local').toLowerCase();
+      const bucket = process.env.STORAGE_BUCKET;
+      const endpoint = process.env.STORAGE_ENDPOINT;
+      const accessKeyId = process.env.STORAGE_ACCESS_KEY;
+      const secretAccessKey = process.env.STORAGE_SECRET_KEY;
+
+      if (!bucket || !accessKeyId || !secretAccessKey) {
+        logFailure('STORAGE_CONFIG_MISSING');
+        return false;
+      }
+
+      // R2 requires its S3 API endpoint. The public bucket URL is not
+      // an acceptable replacement for this endpoint.
+      if ((provider === 'r2' || this.name === 'r2') && !endpoint) {
+        logFailure('STORAGE_ENDPOINT_MISSING');
+        return false;
+      }
+
+      if (endpoint) {
+        try {
+          const parsed = new URL(endpoint);
+          if (
+            parsed.protocol !== 'https:' &&
+            parsed.hostname !== 'localhost' &&
+            parsed.hostname !== '127.0.0.1'
+          ) {
+            logFailure('STORAGE_ENDPOINT_INVALID');
+            return false;
+          }
+          endpointHost = parsed.hostname;
+        } catch {
+          logFailure('STORAGE_ENDPOINT_INVALID');
+          return false;
+        }
+      }
+
+      operation = 'HeadBucket';
+
+      const { client, bucket: configuredBucket } = await this.init();
       const { HeadBucketCommand } = await import('@aws-sdk/client-s3');
-      await client.send(new HeadBucketCommand({ Bucket: bucket }));
-      return true;
-    } catch {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+      try {
+        await client.send(
+          new HeadBucketCommand({ Bucket: configuredBucket }),
+          { abortSignal: controller.signal }
+        );
+
+        console.info(
+          JSON.stringify({
+            event: 'storage.health_check_succeeded',
+            provider: this.name,
+            operation,
+            durationMs: Date.now() - startedAt,
+            endpointHost,
+          })
+        );
+
+        return true;
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (error: unknown) {
+      const err = error as {
+        name?: string;
+        Code?: string;
+        code?: string;
+        message?: string;
+        $metadata?: {
+          httpStatusCode?: number;
+          requestId?: string;
+        };
+      };
+
+      const name = String(err?.name || '');
+      const code = String(err?.Code || err?.code || '');
+      const message = String(err?.message || '');
+      const status = err?.$metadata?.httpStatusCode;
+      const requestId = err?.$metadata?.requestId;
+
+      // Classify using SDK error metadata. Do not log raw messages.
+      let errorCode = 'STORAGE_UNKNOWN_ERROR';
+      let retryable = false;
+
+      if (/InvalidAccessKeyId/i.test(`${name} ${code} ${message}`)) {
+        errorCode = 'STORAGE_CREDENTIALS_REJECTED';
+      } else if (
+        /SignatureDoesNotMatch|InvalidSignature/i.test(
+          `${name} ${code} ${message}`
+        )
+      ) {
+        errorCode = 'STORAGE_SIGNATURE_MISMATCH';
+      } else if (/NoSuchBucket/i.test(`${name} ${code} ${message}`)) {
+        errorCode = 'STORAGE_BUCKET_NOT_FOUND';
+      } else if (
+        /AccessDenied|Forbidden/i.test(`${name} ${code}`) ||
+        status === 403
+      ) {
+        errorCode = 'STORAGE_ACCESS_DENIED';
+      } else if (
+        /AbortError|TimeoutError|RequestTimeout/i.test(`${name} ${code}`)
+      ) {
+        errorCode = 'STORAGE_TIMEOUT';
+        retryable = true;
+      } else if (
+        /ENOTFOUND|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ETIMEDOUT|NetworkingError/i.test(
+          `${name} ${code} ${message}`
+        )
+      ) {
+        errorCode = 'STORAGE_NETWORK_ERROR';
+        retryable = true;
+      } else if (status !== undefined && status >= 500) {
+        errorCode = 'STORAGE_PROVIDER_ERROR';
+        retryable = true;
+      }
+
+      logFailure(errorCode, status, requestId, retryable);
       return false;
     }
-  }
-}
+  }}
 
 function readableNodeToWeb(stream: NodeJS.ReadableStream): ReadableStream<Uint8Array> {
   const reader = stream as any;
