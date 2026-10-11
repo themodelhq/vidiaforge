@@ -429,7 +429,11 @@ export async function recoverStaleRenderJobs(
           completedAt: candidate.completedAt,
         },
       });
-      if (rollback.count !== 1) {
+      if (rollback.count === 1) {
+        // The row was restored to its previous stale state, so it was not
+        // successfully recovered for queue processing in this pass.
+        stats.recovered--;
+      } else {
         stats.skipped++;
         log(`[render-recovery] rollback skipped for ${candidate.id} — another worker changed the row`);
       }
