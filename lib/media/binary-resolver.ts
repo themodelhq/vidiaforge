@@ -88,17 +88,34 @@ async function getVersion(p: string): Promise<string> {
   return stdout.split(/\r?\n/)[0].trim();
 }
 
+/** FFmpeg builds without drawtext cannot render text/caption timelines. */
+export function hasDrawtextFilter(filterList: string): boolean {
+  return filterList.split(/\r?\n/).some((line) =>
+    /^\s*[TSC.]{3}\s+drawtext\s/.test(line),
+  );
+}
+
 async function tryCandidate(
   p: string,
-  source: ResolvedBinary['source']
+  source: ResolvedBinary['source'],
+  requireDrawtext = false,
 ): Promise<ResolvedBinary | null> {
   if (!p) return null;
   if (!(await existsExecutable(p))) return null;
   try {
     const version = await getVersion(p);
+    if (requireDrawtext) {
+      const { stdout, stderr } = await execFileP(p, ['-hide_banner', '-filters'], {
+        maxBuffer: 8 * 1024 * 1024,
+      });
+      if (!hasDrawtextFilter(stdout + '\n' + stderr)) {
+        console.warn('[media:binary-resolver] rejecting ' + p + ': FFmpeg build does not include drawtext');
+        return null;
+      }
+    }
     return { path: p, version, source };
   } catch {
-    // Binary exists but `-version` failed — treat as broken / unavailable.
+    // Binary exists but version/filter inspection failed — treat as unavailable.
     return null;
   }
 }
@@ -182,22 +199,23 @@ export async function resolveFfmpeg(): Promise<ResolvedBinary> {
     tried.push(`env FFMPEG_PATH=${process.env.FFMPEG_PATH}`);
   }
 
-  // 2. ffmpeg-static npm package (bundled binary)
-  const staticPath = await loadFfmpegStatic();
-  if (staticPath) {
-    candidates.push({ path: staticPath, source: 'npm-package' });
-    tried.push(`npm package ffmpeg-static → ${staticPath}`);
-  } else {
-    tried.push('npm package ffmpeg-static (not installed)');
-  }
-
-  // 3. System PATH
+  // 2. Prefer system FFmpeg installed by the runtime image. Static npm
+  // builds may omit optional filters such as drawtext.
   const pathWhich = await whichOnPath('ffmpeg');
   if (pathWhich) {
     candidates.push({ path: pathWhich, source: 'system-path' });
     tried.push(`system PATH → ${pathWhich}`);
   } else {
     tried.push('system PATH (ffmpeg not on PATH)');
+  }
+
+  // 3. Static npm binary is fallback only and must pass the feature check.
+  const staticPath = await loadFfmpegStatic();
+  if (staticPath) {
+    candidates.push({ path: staticPath, source: 'npm-package' });
+    tried.push(`npm package ffmpeg-static → ${staticPath}`);
+  } else {
+    tried.push('npm package ffmpeg-static (not installed)');
   }
 
   // 4. Common container default locations
@@ -207,7 +225,7 @@ export async function resolveFfmpeg(): Promise<ResolvedBinary> {
   }
 
   for (const c of candidates) {
-    const resolved = await tryCandidate(c.path, c.source);
+    const resolved = await tryCandidate(c.path, c.source, true);
     if (resolved) {
       ffmpegCache = resolved;
       // Mirror the resolution into the env var so the legacy
