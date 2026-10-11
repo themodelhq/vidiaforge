@@ -598,6 +598,19 @@ export function buildFilterGraph(
     videoChainEnds.push(blackId);
   }
 
+  // Text-only and caption-only timelines still need a real video stream.
+  // Create the synthetic black canvas BEFORE text/caption nodes are emitted so
+  // drawtext never receives an unlabeled input pad. The source emitter maps the
+  // reserved __black__ asset to an FFmpeg color source.
+  if (videoChainEnds.length === 0 && (textClips.length > 0 || captionClips.length > 0)) {
+    const blackId = label('vblk');
+    nodes.push({
+      id: blackId, inputs: [], type: 'source',
+      assetId: '__black__', storageKey: '__black__', kind: 'image',
+    });
+    videoChainEnds.push(blackId);
+  }
+
   // === AUDIO chains ===
   for (const { clip } of audioClips) {
     const asset = clip.assetId ? assetsById[clip.assetId] : undefined;
