@@ -5,6 +5,7 @@
  * health listener stays internal on WORKER_PORT (default 3001).
  */
 import { spawn, type ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import process from 'node:process';
 
 const root = '/app';
@@ -19,6 +20,11 @@ let shuttingDown = false;
 let workerRestartDelayMs = 2_000;
 let shutdownTimer: ReturnType<typeof setTimeout> | null = null;
 
+function configFingerprint(value: string | undefined): string {
+  if (!value) return 'missing';
+  return createHash('sha256').update(value).digest('hex').slice(0, 12);
+}
+
 function log(event: string, extra: Record<string, unknown> = {}) {
   console.log(JSON.stringify({
     component: 'combined-runtime',
@@ -30,7 +36,7 @@ function log(event: string, extra: Record<string, unknown> = {}) {
 
 function startApi() {
   log('api.starting', { port, hostname });
-  apiChild = spawn('bun', ['server.js'], {
+  apiChild = spawn('bun', ['--no-env-file', 'server.js'], {
     cwd: root,
     env: { ...process.env, PORT: port, HOSTNAME: hostname },
     stdio: 'inherit',
@@ -51,7 +57,7 @@ function startWorker() {
   if (shuttingDown) return;
   log('worker.starting', { restartDelayMs: workerRestartDelayMs });
 
-  const child = spawn('bun', ['run', 'src/index.ts'], {
+  const child = spawn('bun', ['--no-env-file', 'run', 'src/index.ts'], {
     cwd: workerDir,
     env: {
       ...process.env,
@@ -115,6 +121,8 @@ process.on('SIGINT', () => void shutdown(0));
 log('runtime.starting', {
   nodeVersion: process.version,
   workerConcurrency: process.env.WORKER_CONCURRENCY || '1',
+  databaseUrlFingerprint: configFingerprint(process.env.DATABASE_URL),
+  redisUrlFingerprint: configFingerprint(process.env.REDIS_URL),
 });
 startApi();
 startWorker();

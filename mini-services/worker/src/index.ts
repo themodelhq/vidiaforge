@@ -30,6 +30,8 @@ import { createServer } from 'http';
 
 import { mkdir, access } from 'fs/promises';
 
+import { createHash } from 'node:crypto';
+
 import process from 'process';
 
 import { PrismaClient } from '@prisma/client';
@@ -946,6 +948,11 @@ function setupShutdown() {
 
 // === Helpers ===================================================================
 
+function configFingerprint(value: string | undefined): string {
+  if (!value) return 'missing';
+  return createHash('sha256').update(value).digest('hex').slice(0, 12);
+}
+
 function maskUrl(url: string): string {
   // Mask passwords in connection strings so credentials never appear in logs.
   try {
@@ -973,6 +980,11 @@ async function main(): Promise<void> {
     `[worker] node=${process.version} platform=${process.platform} arch=${process.arch}`,
 
   );
+
+  console.log('[worker] runtime config fingerprints:', JSON.stringify({
+    databaseUrlFingerprint: configFingerprint(process.env.DATABASE_URL),
+    redisUrlFingerprint: configFingerprint(process.env.REDIS_URL),
+  }));
 
   // Run pre-flight checks in parallel where independent.
 

@@ -83,7 +83,7 @@ function probeAudioFile(absPath: string): {
     if (!existsSync(absPath)) return fallback;
     const size = statSync(absPath).size;
     // V19.1 §4.3: invoke FFprobe to read the real stream metadata.
-    const stdout = execFileSync(FFPROBE_BIN, [
+    const stdout = execFileSync(/*turbopackIgnore: true*/ FFPROBE_BIN, [
       '-v', 'quiet',
       '-print_format', 'json',
       '-show_streams',
