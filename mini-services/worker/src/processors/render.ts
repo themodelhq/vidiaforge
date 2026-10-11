@@ -304,7 +304,13 @@ export async function processRender(job: any): Promise<void> {
       where: { id: jobId },
       include: { project: true },
     });
-    if (!renderJob) throw new Error(`RenderJob ${jobId} not found`);
+    if (!renderJob) {
+      // A render row may have been deleted while its BullMQ message remained
+      // in Redis. This is permanent, not transient: retrying cannot recreate
+      // the row. Acknowledge the orphan and leave an auditable warning.
+      console.warn(`[render] orphan queue job ${job.id ?? 'unknown'} references missing RenderJob ${jobId}; skipping`);
+      return;
+    }
 
     // Idempotency: if already completed/cancelled, skip entirely.
     if (renderJob.status === 'completed') {
