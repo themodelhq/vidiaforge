@@ -70,18 +70,37 @@ RUN test -f .next/standalone/server.js && \
 # ─── Stage 3: Runtime ────────────────────────────────────────────────────────
 FROM oven/bun:1.3.14-alpine AS runner
 
+# Alpine's ffmpeg package provides both ffmpeg and ffprobe.
+# font-dejavu supplies the actual font files used by the drawtext smoke test.
 RUN apk add --no-cache \
     ffmpeg \
-    ffprobe \
     font-dejavu \
-    ttf-dejavu-core \
     wget \
     libc6-compat
 
-# FFmpeg must be operational for media processing.
-RUN ffmpeg -version && \
-    ffprobe -version && \
-    echo "FFmpeg and FFprobe verified."
+# Force the resolver to use the Alpine system binaries. The npm
+# ffmpeg-static build is not guaranteed to include drawtext, even when
+# its build configuration lists font libraries.
+ENV FFMPEG_PATH=/usr/bin/ffmpeg
+ENV FFPROBE_PATH=/usr/bin/ffprobe
+
+# Fail the image build unless the exact production binaries support real text
+# rendering, H.264 encoding, and FFprobe inspection.
+RUN set -eu; \
+    test -x "$FFMPEG_PATH"; \
+    test -x "$FFPROBE_PATH"; \
+    "$FFMPEG_PATH" -version; \
+    "$FFPROBE_PATH" -version; \
+    "$FFMPEG_PATH" -hide_banner -filters 2>&1 | grep -E '[[:space:]]drawtext[[:space:]]'; \
+    FONT_FILE="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"; \
+    if [ -z "$FONT_FILE" ]; then echo "ERROR: DejaVuSans.ttf not found"; exit 1; fi; \
+    "$FFMPEG_PATH" -hide_banner -loglevel error -f lavfi -i color=c=black:s=320x240:d=1 \
+      -vf "drawtext=fontfile=$FONT_FILE:text=VidiaForge:fontsize=24:fontcolor=white:x=10:y=10" \
+      -frames:v 1 -c:v libx264 -pix_fmt yuv420p -y /tmp/vidiaforge-drawtext-smoke.mp4; \
+    "$FFPROBE_PATH" -v error -select_streams v:0 -show_entries stream=codec_name,width,height \
+      -of csv=p=0 /tmp/vidiaforge-drawtext-smoke.mp4 | grep -q '^h264,320,240$'; \
+    rm -f /tmp/vidiaforge-drawtext-smoke.mp4; \
+    echo "[PASS] Production FFmpeg supports drawtext, DejaVu fonts, libx264, and FFprobe."
 
 RUN mkdir -p /usr/share/fonts/truetype/dejavu && \
     test -n "$(find /usr/share/fonts -type f -iname '*dejavu*' -print -quit)" && \
