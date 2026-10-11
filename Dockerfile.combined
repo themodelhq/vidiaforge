@@ -1,0 +1,232 @@
+
+# VidiaForge — worker-only Docker image
+# Fail-fast dependency installation, merging and runtime verification.
+
+# ─── Stage 1: Root dependencies ──────────────────────────────────────────────
+FROM oven/bun:1.3.14-alpine AS deps
+
+RUN apk add --no-cache python3 make g++ libc6-compat
+
+WORKDIR /app
+
+COPY package.json bun.lock* ./
+
+RUN bun install --frozen-lockfile
+
+# ─── Stage 1b: Worker dependencies ───────────────────────────────────────────
+FROM oven/bun:1.3.14-alpine AS worker-deps
+
+RUN apk add --no-cache python3 make g++ libc6-compat
+
+WORKDIR /app
+
+COPY mini-services/worker/package.json mini-services/worker/bun.lock* ./mini-services/worker/
+
+WORKDIR /app/mini-services/worker
+
+# Fail the build if the worker lockfile and manifest are inconsistent.
+RUN bun install --frozen-lockfile
+
+# Verify that Bun produced a non-empty worker dependency tree.
+RUN test -d node_modules && \
+    test -n "$(find node_modules -mindepth 1 -maxdepth 1 -print -quit)" && \
+    echo "Worker dependencies installed."
+
+# ─── Stage 2: Build ──────────────────────────────────────────────────────────
+FROM oven/bun:1.3.14-alpine AS build
+
+RUN apk add --no-cache libc6-compat
+
+WORKDIR /app
+
+COPY --from=deps \
+    /app/node_modules \
+    ./node_modules
+
+COPY --from=worker-deps \
+    /app/mini-services/worker/node_modules \
+    ./mini-services/worker/node_modules
+
+COPY . .
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Generate Prisma Client BEFORE next build. Next.js evaluates API route modules
+# while collecting page data, and those modules import Prisma Client.
+# Generating only after the build is too late.
+RUN bunx prisma generate
+
+RUN bun run build
+
+# Keep a post-build generation pass for the worker/runtime dependency tree.
+RUN bunx prisma generate
+
+# Prune root development dependencies for production.
+RUN bun install --frozen-lockfile --production
+
+# Verify required build outputs before creating the runtime image.
+RUN test -f .next/standalone/server.js && \
+    test -d .next/static && \
+    test -f mini-services/worker/src/index.ts && \
+    test -d mini-services/worker/node_modules && \
+    test -d node_modules && \
+    echo "Build outputs verified."
+
+# ─── Stage 3: Runtime ────────────────────────────────────────────────────────
+FROM oven/bun:1.3.14-alpine AS runner
+
+RUN apk add --no-cache \
+    ffmpeg \
+    ffprobe \
+    font-dejavu \
+    ttf-dejavu-core \
+    wget \
+    libc6-compat
+
+# FFmpeg must be operational for media processing.
+RUN ffmpeg -version && \
+    ffprobe -version && \
+    echo "FFmpeg and FFprobe verified."
+
+RUN mkdir -p /usr/share/fonts/truetype/dejavu && \
+    test -n "$(find /usr/share/fonts -type f -iname '*dejavu*' -print -quit)" && \
+    echo "DejaVu fonts verified."
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV WORKER_CONCURRENCY=1
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
+ENV TEMP_DIR=/app/tmp
+ENV UPLOAD_DIR=/app/uploads
+
+# Non-root runtime account.
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+# ─── Copy Next.js build artifacts ────────────────────────────────────────────
+COPY --from=build --chown=nextjs:nodejs \
+    /app/.next/standalone ./
+
+COPY --from=build --chown=nextjs:nodejs \
+    /app/.next/static ./.next/static
+
+COPY --from=build --chown=nextjs:nodejs \
+    /app/public ./public
+
+COPY --from=build --chown=nextjs:nodejs \
+    /app/prisma ./prisma
+
+COPY --from=build --chown=nextjs:nodejs \
+    /app/package.json ./package.json
+
+# ─── Copy worker and shared source ───────────────────────────────────────────
+COPY --from=build --chown=nextjs:nodejs \
+    /app/mini-services ./mini-services
+
+COPY --from=build --chown=nextjs:nodejs \
+    /app/lib ./lib
+
+COPY --from=build --chown=nextjs:nodejs \
+    /app/stores ./stores
+
+COPY --from=build --chown=nextjs:nodejs \
+    /app/src ./src
+
+# Copy the production-pruned root dependencies, including generated Prisma
+# client files.
+COPY --from=build --chown=nextjs:nodejs \
+    /app/node_modules ./node_modules
+
+# ─── CRITICAL: Merge worker dependencies; never suppress errors ──────────────
+#
+# Do not replace this with "|| echo WARNING".
+# A missing or failed dependency merge must fail the Docker build.
+#
+# The worker package tree is merged into root node_modules so shared modules
+# imported from /app/lib and /app/src can resolve worker dependencies.
+#
+# cp -a preserves file attributes and symlinks; the "/." source includes
+# hidden entries such as Bun's internal dependency directory.
+
+RUN set -eu; \
+    WORKER_MODULES="/app/mini-services/worker/node_modules"; \
+    ROOT_MODULES="/app/node_modules"; \
+    \
+    if [ ! -d "$WORKER_MODULES" ]; then \
+        echo "ERROR: worker node_modules directory is missing."; \
+        exit 1; \
+    fi; \
+    \
+    if [ -z "$(find "$WORKER_MODULES" -mindepth 1 -maxdepth 1 -print -quit)" ]; then \
+        echo "ERROR: worker node_modules directory is empty."; \
+        exit 1; \
+    fi; \
+    \
+    if [ ! -d "$ROOT_MODULES" ]; then \
+        echo "ERROR: root node_modules directory is missing."; \
+        exit 1; \
+    fi; \
+    \
+    echo "Merging worker dependencies into root node_modules..."; \
+    cp -a "$WORKER_MODULES"/. "$ROOT_MODULES"/; \
+    \
+    echo "Verifying required worker dependencies..."; \
+    for package in \
+        "@aws-sdk/client-s3" \
+        "@aws-sdk/lib-storage" \
+        "@aws-sdk/s3-request-presigner" \
+        "@prisma/client" \
+        "bullmq" \
+        "ffmpeg-static" \
+        "ffprobe-static" \
+        "ioredis" \
+        "z-ai-web-dev-sdk" \
+        "zod"; \
+    do \
+        package_file="$ROOT_MODULES/$package/package.json"; \
+        if [ ! -f "$package_file" ]; then \
+            echo "ERROR: Required runtime dependency is missing: $package"; \
+            exit 1; \
+        fi; \
+    done; \
+    \
+    echo "Verifying Prisma client artifacts..."; \
+    if [ ! -d "$ROOT_MODULES/.prisma/client" ]; then \
+        echo "ERROR: Generated Prisma client is missing."; \
+        exit 1; \
+    fi; \
+    \
+    echo "Worker dependency merge and verification completed successfully."
+
+# ─── Runtime directories ─────────────────────────────────────────────────────
+RUN mkdir -p /app/uploads /app/tmp /app/cache && \
+    chown -R nextjs:nodejs \
+        /app/uploads \
+        /app/tmp \
+        /app/cache \
+        /app/node_modules \
+        /app/mini-services \
+        /app/lib \
+        /app/stores \
+        /app/src
+
+# ─── Final image verification ────────────────────────────────────────────────
+RUN set -eu; \
+    test -f /app/mini-services/worker/src/index.ts; \
+    test -f /app/mini-services/worker/package.json; \
+    test -f /app/package.json; \
+    test -f /app/.next/standalone/server.js; \
+    test -d /app/.next/static; \
+    command -v ffmpeg >/dev/null 2>&1; \
+    command -v ffprobe >/dev/null 2>&1; \
+    echo "VidiaForge worker runtime files verified."
+
+USER nextjs
+
+EXPOSE 3000 3001
+
+# Start the Next.js API and BullMQ worker under one supervisor.
+CMD ["bun", "run", "mini-services/worker/src/combined-start.ts"]
