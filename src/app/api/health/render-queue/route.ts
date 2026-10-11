@@ -4,6 +4,7 @@ import { Queue } from 'bullmq';
 import { getSessionUser } from '@/lib/auth';
 import { db } from '@/lib/db';
 import { QUEUE_NAMES } from '@/lib/queue-names';
+import { isDiagnosticsBearerAuthorized } from '@/lib/render/diagnostics-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,9 +13,15 @@ export const dynamic = 'force-dynamic';
  * Protected diagnostic endpoint for investigating render jobs stuck in queued.
  * Returns aggregate queue data only; never returns Redis URLs or credentials.
  */
-export async function GET() {
-  const user = await getSessionUser();
-  if (!user) {
+export async function GET(req: Request) {
+  // This endpoint supports both the existing signed-in session and a dedicated
+  // operator token for Render-based diagnostics tools. The token is server-only.
+  const tokenAuthorized = isDiagnosticsBearerAuthorized(
+    req.headers.get('authorization'),
+    process.env.RENDER_DIAGNOSTICS_TOKEN,
+  );
+  const user = tokenAuthorized ? null : await getSessionUser();
+  if (!tokenAuthorized && !user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
