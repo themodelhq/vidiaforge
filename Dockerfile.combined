@@ -86,10 +86,13 @@ RUN apk add --no-cache \
     wget \
     libc6-compat
 
-# FFmpeg must be operational for media processing.
+# FFmpeg must be operational for media processing, including timeline text overlays.
+# Fail the image build if the installed FFmpeg lacks drawtext; the renderer relies
+# on it and must not discover this incompatibility only after a user submits a job.
 RUN ffmpeg -version && \
     ffprobe -version && \
-    echo "FFmpeg and FFprobe verified."
+    (ffmpeg -hide_banner -filters 2>&1 | grep -Eq '[[:space:]]drawtext[[:space:]]') && \
+    echo "FFmpeg, FFprobe, and drawtext filter verified."
 
 RUN mkdir -p /usr/share/fonts/truetype/dejavu && \
     test -n "$(find /usr/share/fonts -type f -iname '*dejavu*' -print -quit)" && \
