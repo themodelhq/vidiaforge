@@ -229,10 +229,14 @@ export class FFmpegRenderService {
         }
       }
     } catch (err) {
-      // objectExists shouldn't throw on missing — but if it does (S3 creds,
-      // network error), log + continue with render. A real failure surfaces
-      // during the upload step.
-      console.warn(`[render] idempotency check failed for ${input.outputPath}:`, err instanceof Error ? err.message : err);
+      // A failed HEAD/objectExists request is NOT proof that the output is
+      // absent. Continuing could overwrite a valid render or mask a storage
+      // outage. The worker's transient-error retry policy will retry this
+      // operation; confirmed 404 responses are normalized to false by the
+      // storage provider and still follow the normal render path.
+      const detail = err instanceof Error ? err.message : String(err);
+      console.error(`[render] idempotency storage check failed for ${input.outputPath}; aborting this attempt: ${detail}`);
+      throw new Error(`Render output existence check failed for ${input.outputPath}: ${detail}`);
     }
 
     const tmpDir = await mkdtemp(path.join(tmpdir(), 'vf-render-'));
