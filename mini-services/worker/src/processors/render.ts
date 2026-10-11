@@ -306,10 +306,12 @@ export async function processRender(job: any): Promise<void> {
     });
     if (!renderJob) {
       // A render row may have been deleted while its BullMQ message remained
-      // in Redis. This is permanent, not transient: retrying cannot recreate
-      // the row. Acknowledge the orphan and leave an auditable warning.
-      console.warn(`[render] orphan queue job ${job.id ?? 'unknown'} references missing RenderJob ${jobId}; skipping`);
-      return;
+      // in Redis. This is permanent, not transient: retries cannot recreate
+      // the row. Keep the orphan visible as failed, but prevent retry loops.
+      const message = `RenderJob ${jobId} not found (orphan render queue job)`;
+      console.error(`[render] ${message}; queueJobId=${job.id ?? 'unknown'}`);
+      if (typeof job.discard === 'function') job.discard();
+      throw new Error(message);
     }
 
     // Idempotency: if already completed/cancelled, skip entirely.
