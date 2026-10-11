@@ -281,7 +281,7 @@ export async function recoverStaleJobs(
 
 
 export interface RenderRecoveryOptions {
-  /** Override the render lease cutoff (default: RENDER_JOB_STALE_AFTER_MS or 30 minutes). */
+  /** Override the render lease cutoff (default: RENDER_JOB_STALE_AFTER_MS or 3 minutes). */
   leaseMs?: number;
   /** If true, recover the DB row without sending a BullMQ message (tests only). */
   skipRequeue?: boolean;
@@ -313,7 +313,7 @@ export async function recoverStaleRenderJobs(
   };
   const leaseMs =
     options.leaseMs ??
-    Number.parseInt(process.env.RENDER_JOB_STALE_AFTER_MS || String(30 * 60_000), 10);
+    Number.parseInt(process.env.RENDER_JOB_STALE_AFTER_MS || String(3 * 60_000), 10);
   const staleCutoff = new Date(Date.now() - Math.max(1_000, leaseMs));
   const activeStatuses = ['preparing', 'processing', 'encoding', 'uploading'];
   const staleClause = {
