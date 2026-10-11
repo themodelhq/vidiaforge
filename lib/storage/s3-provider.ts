@@ -33,6 +33,35 @@ interface LoadedSdk {
   getSignedUrl: (client: S3ClientLike, command: unknown, options: { expiresIn: number }) => Promise<string>;
 }
 
+
+/**
+ * S3-compatible providers do not all shape missing-object errors the same
+ * way. In particular, Cloudflare R2 can expose a generic "UnknownError" name
+ * while still returning HTTP 404 in the AWS SDK metadata. Prefer the HTTP
+ * status/code fields; only treat a confirmed not-found response as absence.
+ */
+export function isMissingS3ObjectError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const value = err as {
+    name?: unknown;
+    Code?: unknown;
+    code?: unknown;
+    message?: unknown;
+    statusCode?: unknown;
+    $metadata?: { httpStatusCode?: unknown };
+    $response?: { statusCode?: unknown };
+  };
+  const status = value.$metadata?.httpStatusCode ?? value.$response?.statusCode ?? value.statusCode;
+  if (Number(status) === 404) return true;
+
+  const codes = [value.name, value.Code, value.code]
+    .filter((part): part is string => typeof part === 'string')
+    .join(' ');
+  const message = typeof value.message === 'string' ? value.message : '';
+  return /NoSuchKey|NotFound|Not Found|NoSuchObject/i.test(`${codes} ${message}`) ||
+    /(?:HTTP|status(?: code)?)\s*[:=]?\s*404\b/i.test(message);
+}
+
 let sdkPromise: Promise<LoadedSdk> | null = null;
 
 async function loadSdk(): Promise<LoadedSdk> {
@@ -167,12 +196,10 @@ export class S3StorageProvider implements StorageProvider {
         lastModified: resp.LastModified instanceof Date ? resp.LastModified : undefined,
       };
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      // S3 returns NotFound (HTTP 404) when the object doesn't exist. The AWS
-      // SDK v3 throws an error with name 'NotFound' / '$NotFound' or a
-      // statusCode/S3-specific message. Match the common patterns and return
-      // null; only propagate transport errors (auth, network, etc.).
-      if (/NotFound|NoSuchKey|404/i.test(msg)) return null;
+      // Only a confirmed not-found response means the key is absent. Do not
+      // mistake generic provider failures (auth, network, R2 UnknownError) for
+      // a missing object.
+      if (isMissingS3ObjectError(err)) return null;
       throw err;
     }
   }
@@ -353,8 +380,10 @@ export class S3StorageProvider implements StorageProvider {
       await client.send(new sdk.HeadObjectCommand({ Bucket: bucket, Key: key }));
       return true;
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (/NotFound|404|NoSuchKey/i.test(msg)) return false;
+      // R2 may use the generic error name "UnknownError" for a 404. Inspect
+      // SDK HTTP metadata as well as provider error codes before deciding the
+      // object is absent; propagate all non-404 failures to the render retry.
+      if (isMissingS3ObjectError(err)) return false;
       throw err;
     }
   }
